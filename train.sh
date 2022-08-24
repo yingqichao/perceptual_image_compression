@@ -1,4 +1,5 @@
-CUDA_VISIBLE_DEVICES=0 python ./train_compress.py -compression_rate 32 \
+CUDA_VISIBLE_DEVICES=1 python ./train_compress.py -compression_rate 24 \
                                                   -cls_weight 0.005 \
-                                                  -thresh 29 \
+                                                  -thresh 28 \
+                                                  -batch 64 \
                                                   -checkpoint 0

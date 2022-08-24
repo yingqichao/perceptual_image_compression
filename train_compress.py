@@ -18,6 +18,7 @@ parser.add_argument('-checkpoint', type=int, default=0.0, help='')
 parser.add_argument('-compression_rate', type=float, default=32, help='')
 parser.add_argument('-cls_weight', type=float, default=0.005, help='')
 parser.add_argument('-thresh', type=int, default=28, help='')
+parser.add_argument('-batch', type=int, default=64, help='')
 args = parser.parse_args()
 print(args)
 
@@ -25,7 +26,14 @@ transform = transforms.Compose(
     [transforms.ToTensor(),
      transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-batch_size = 32
+########### Settings ################
+print_step, save_step = 50, 750
+batch_size = args.batch # 64
+psnr_thresh = args.thresh # 28
+cls_weight = args.cls_weight #0.005
+compression_rate = args.compression_rate
+print(f"scale is {compression_rate}")
+#####################################
 print("using CIFAR10")
 trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
                                         download=True, transform=transform)
@@ -40,13 +48,6 @@ testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
 classes = ('plane', 'car', 'bird', 'cat',
            'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
-########### Settings ################
-print_step, save_step = 50, 750
-psnr_thresh = args.thresh # 28
-cls_weight = args.cls_weight #0.005
-compression_rate = args.compression_rate
-print(f"scale is {compression_rate}")
-#####################################
 model_en = MIMOUNetv2_encoder(scale=compression_rate).cuda()
 model_de = MIMOUNetv2_decoder(scale=compression_rate).cuda()
 model_rec = MIMOUNetv2(scale=compression_rate).cuda()

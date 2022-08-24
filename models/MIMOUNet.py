@@ -677,21 +677,21 @@ class MIMOUNetv2(nn.Module):
             BasicConv(base_channel, base_channel*1, kernel_size=1, stride=1, relu=False, norm=False)
         )
         self.AFF2_with_SE = nn.Sequential(
-            BasicConv(base_channel * (7+2), base_channel*2, kernel_size=3, stride=1, relu=True),
+            BasicConv(base_channel * (7+1), base_channel*2, kernel_size=3, stride=1, relu=True),
             BasicConv(base_channel*2, base_channel * 2, kernel_size=1, stride=1, relu=False, norm=False)
         )
         self.AFF3_with_SE = nn.Sequential(
-            BasicConv(base_channel * (4+4), base_channel*4, kernel_size=3, stride=1, relu=True),
+            BasicConv(base_channel * (4+1), base_channel*4, kernel_size=3, stride=1, relu=True),
             BasicConv(base_channel*4, base_channel * 4, kernel_size=1, stride=1, relu=False, norm=False)
         )
 
         self.se_attention_AFF1 = SEAttention(channel=base_channel * (7+1))
-        self.se_attention_AFF2 = SEAttention(channel=base_channel * (7+2))
-        self.se_attention_AFF3 = SEAttention(channel=base_channel * (4+4))
+        self.se_attention_AFF2 = SEAttention(channel=base_channel * (7+1))
+        self.se_attention_AFF3 = SEAttention(channel=base_channel * (4+1))
 
         self.conv1x1_4 = BasicConv(1, base_channel, kernel_size=1, stride=1, relu=False, norm=False)
-        self.conv1x1_2 = BasicConv(1, base_channel * 2, kernel_size=1, stride=1, relu=False, norm=False)
-        self.conv1x1_1 = BasicConv(1, base_channel * 4, kernel_size=1, stride=1, relu=False, norm=False)
+        self.conv1x1_2 = BasicConv(1, base_channel, kernel_size=1, stride=1, relu=False, norm=False)
+        self.conv1x1_1 = BasicConv(1, base_channel, kernel_size=1, stride=1, relu=False, norm=False)
 
         self.FAM1 = FAM(base_channel * 4)
         self.SCM1 = SCM(base_channel * 4)
