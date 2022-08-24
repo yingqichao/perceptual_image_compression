@@ -137,7 +137,8 @@ with torch.enable_grad():
             encoded = model_en(inputs)
             decoded = model_de(encoded)
             decoded_clamp = clamp_with_grad(decoded)
-            recovered = model_rec(decoded_clamp)
+            recovered = model_rec(decoded)
+            recovered_clamp = clamp_with_grad(recovered)
 
             gan_real = model_dis(inputs)
             gan_fake = model_dis(recovered.detach())
@@ -150,8 +151,8 @@ with torch.enable_grad():
             optimizer_dis.step()
             optimizer_dis.zero_grad()
 
-            psnr_forward = psnr(postprocess(decoded), postprocess(inputs)).item()
-            psnr_backward = psnr(postprocess(recovered), postprocess(inputs)).item()
+            psnr_forward = psnr(postprocess(decoded_clamp), postprocess(inputs)).item()
+            psnr_backward = psnr(postprocess(recovered_clamp), postprocess(inputs)).item()
 
             loss_cls_wrong = criterion(net1(decoded),labels) + \
                              criterion(net2(decoded),labels) + \
@@ -254,10 +255,11 @@ with torch.enable_grad():
                 encoded = model_en(inputs)
                 decoded = model_de(encoded)
                 decoded_clamp = clamp_with_grad(decoded)
-                recovered = model_rec(decoded_clamp)
+                recovered = model_rec(decoded)
+                recovered_clamp = clamp_with_grad(recovered)
 
-                psnr_forward = psnr(postprocess(decoded), postprocess(inputs)).item()
-                psnr_backward = psnr(postprocess(recovered), postprocess(inputs)).item()
+                psnr_forward = psnr(postprocess(decoded_clamp), postprocess(inputs)).item()
+                psnr_backward = psnr(postprocess(recovered_clamp), postprocess(inputs)).item()
                 _, argmax = torch.max(net1(inputs), 1)
                 running_cls1 += (labels == argmax.squeeze()).float().mean()
                 _, argmax = torch.max(net2(inputs), 1)
