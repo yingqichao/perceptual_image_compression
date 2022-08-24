@@ -2,6 +2,18 @@ import time
 import numpy as np
 from PIL import Image
 import torch
+import math
+
+def diff_round(input_tensor):
+    # input_tensor must be within [0,1]
+    input_tensor = input_tensor / 2 + 0.5
+    input_tensor = input_tensor*255.
+    test = 0
+    for n in range(1, 10):
+        test += math.pow(-1, n+1) / n * torch.sin(2 * math.pi * n * input_tensor)
+    final_tensor = input_tensor - 1 / math.pi * test
+    return (final_tensor/255.-0.5)*2
+
 
 def clamp_with_grad(tensor):
     tensor_clamp = torch.clamp(tensor, 0, 1)

@@ -12,6 +12,7 @@ from models.class_models.googlenet import GoogLeNet
 from utils import stitch_images, clamp_with_grad
 import torch.optim as optim
 import argparse
+from utils import diff_round
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-checkpoint', type=int, default=0.0, help='')
@@ -28,7 +29,7 @@ transform = transforms.Compose(
 
 ########### Settings ################
 print_step, save_step = 50, 750
-batch_size = args.batch # 64
+batch_size = args.batch
 psnr_thresh = args.thresh # 28
 cls_weight = args.cls_weight #0.005
 compression_rate = args.compression_rate
@@ -58,6 +59,7 @@ net2 = ResNet18(num_classes=10).cuda()
 # net = PreActResNet18()
 net3 = GoogLeNet(num_classes=10).cuda()
 # net = DenseNet121()
+quantization = diff_round
 
 if args.checkpoint!=0:
     PATH = f'./vgg_{str(int(compression_rate))}.pth'
@@ -81,19 +83,19 @@ criterion = nn.CrossEntropyLoss().cuda()
 l1_loss = nn.SmoothL1Loss().cuda()
 bce_with_logits_loss = nn.BCEWithLogitsLoss().cuda()
 optimizer_dis = optim.AdamW(model_dis.parameters(),
-                                 lr=2e-4,betas=(0.9, 0.999), weight_decay=0.01)
+                                 lr=2e-4)
 optimizer_en = optim.AdamW(model_en.parameters(),
-                                 lr=2e-4,betas=(0.9, 0.999), weight_decay=0.01)
+                                 lr=2e-4)
 optimizer_de = optim.AdamW(model_de.parameters(),
-                                 lr=2e-4,betas=(0.9, 0.999), weight_decay=0.01)
+                                 lr=2e-4)
 optimizer_net1 = optim.AdamW(net1.parameters(),
-                                 lr=1e-3,betas=(0.9, 0.999), weight_decay=0.01)
+                                 lr=1e-3)
 optimizer_net2 = optim.AdamW(net2.parameters(),
-                                 lr=1e-3,betas=(0.9, 0.999), weight_decay=0.01)
+                                 lr=1e-3)
 optimizer_net3 = optim.AdamW(net3.parameters(),
-                                 lr=1e-3,betas=(0.9, 0.999), weight_decay=0.01)
+                                 lr=1e-3)
 optimizer_rec = optim.AdamW(model_rec.parameters(),
-                                 lr=2e-4,betas=(0.9, 0.999), weight_decay=0.01)
+                                 lr=2e-4)
 
 for epoch in range(50):  # loop over the dataset multiple times
     with torch.enable_grad():
@@ -139,19 +141,19 @@ for epoch in range(50):  # loop over the dataset multiple times
             encoded = model_en(inputs)
             decoded = model_de(encoded)
             # decoded_clamp = clamp_with_grad(decoded)
-            recovered = model_rec(decoded, encoded)
+            recovered = model_rec(decoded)
             # recovered_clamp = clamp_with_grad(recovered)
 
-            gan_real = model_dis(inputs)
-            gan_fake = model_dis(recovered.detach())
-            gan_fake1 = model_dis(decoded.detach())
-            loss_g_real = bce_with_logits_loss(gan_real,torch.ones_like(gan_real))
-            loss_g_fake = bce_with_logits_loss(gan_fake,torch.zeros_like(gan_fake))
-            loss_g_fake1 = bce_with_logits_loss(gan_fake1, torch.zeros_like(gan_fake))
-            loss_gan = ((loss_g_fake+loss_g_fake1)/2+loss_g_real)/2
-            loss_gan.backward()
-            optimizer_dis.step()
-            optimizer_dis.zero_grad()
+            # gan_real = model_dis(inputs)
+            # gan_fake = model_dis(recovered.detach())
+            # gan_fake1 = model_dis(decoded.detach())
+            # loss_g_real = bce_with_logits_loss(gan_real,torch.ones_like(gan_real))
+            # loss_g_fake = bce_with_logits_loss(gan_fake,torch.zeros_like(gan_fake))
+            # loss_g_fake1 = bce_with_logits_loss(gan_fake1, torch.zeros_like(gan_fake))
+            # loss_gan = ((loss_g_fake+loss_g_fake1)/2+loss_g_real)/2
+            # loss_gan.backward()
+            # optimizer_dis.step()
+            # optimizer_dis.zero_grad()
 
             psnr_forward = psnr(postprocess(decoded), postprocess(inputs)).item()
             psnr_backward = psnr(postprocess(recovered), postprocess(inputs)).item()
@@ -167,14 +169,15 @@ for epoch in range(50):  # loop over the dataset multiple times
             # loss_CW = cw_loss(should_be_right, labels)
 
             loss_recover = l1_loss(recovered,inputs)
-            loss_coarse = l1_loss(decoded,inputs)
-            gan_fake = model_dis(recovered)
-            loss_g = bce_with_logits_loss(gan_fake,torch.ones_like(gan_fake))
-            gan_fake1 = model_dis(decoded)
-            loss_g1 = bce_with_logits_loss(gan_fake1, torch.ones_like(gan_fake))
+            loss_coarse = l1_loss(decoded, inputs)
+
+            # gan_fake = model_dis(recovered)
+            # loss_g = bce_with_logits_loss(gan_fake,torch.ones_like(gan_fake))
+            # gan_fake1 = model_dis(decoded)
+            # loss_g1 = bce_with_logits_loss(gan_fake1, torch.ones_like(gan_fake))
 
             loss = loss_coarse+loss_recover
-            loss += loss_g*0.01+loss_g1*0.01
+            # loss += loss_g*0.01+loss_g1*0.01
             if epoch>=3 and psnr_forward>=psnr_thresh:
                 loss += -cls_weight*loss_cls_wrong+1*cls_weight*loss_cls_right
             loss.backward()
@@ -184,7 +187,7 @@ for epoch in range(50):  # loop over the dataset multiple times
             optimizer_rec.step()
 
             running_loss += loss.item()
-            running_gan += loss_gan.item()
+            # running_gan += loss_gan.item()
             running_coarse += psnr_forward
             running_cls1 += loss_cls1.item()
             running_cls2 += loss_cls2.item()
@@ -255,9 +258,10 @@ for epoch in range(50):  # loop over the dataset multiple times
             inputs, labels = inputs.cuda(), labels.cuda()
 
             encoded = model_en(inputs)
+            encoded = quantization(encoded)
             decoded = model_de(encoded)
             # decoded_clamp = clamp_with_grad(decoded)
-            recovered = model_rec(decoded, encoded)
+            recovered = model_rec(decoded)
             # recovered_clamp = clamp_with_grad(recovered)
 
             psnr_forward = psnr(postprocess(decoded), postprocess(inputs)).item()
