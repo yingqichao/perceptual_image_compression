@@ -3,7 +3,7 @@ import torch.nn as nn
 
 
 class BasicConv(nn.Module):
-    def __init__(self, in_channel, out_channel, kernel_size, stride, bias=True, norm=False, relu=True, transpose=False):
+    def __init__(self, in_channel, out_channel, kernel_size, stride, bias=True, norm=True, relu=True, transpose=False):
         super(BasicConv, self).__init__()
         if bias and norm:
             bias = False

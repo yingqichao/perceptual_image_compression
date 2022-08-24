@@ -3,7 +3,7 @@ import torchvision
 import torchvision.transforms as transforms
 import torch.nn as nn
 from models.MIMOUNet import MIMOUNet_encoder, MIMOUNet_decoder, \
-    MIMOUNet, Simple_Class_Net, SimplePatchGAN
+    MIMOUNet, Simple_Class_Net, SimplePatchGAN, MIMOUNetv2_decoder, MIMOUNetv2_encoder
 from metrics import PSNR, postprocess
 from models.loss import CWLoss
 from models.class_models.vgg import VGG
@@ -25,7 +25,7 @@ transform = transforms.Compose(
     [transforms.ToTensor(),
      transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-batch_size = 16
+batch_size = 64
 print("using CIFAR10")
 trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
                                         download=True, transform=transform)
@@ -47,8 +47,8 @@ cls_weight = args.cls_weight #0.005
 compression_rate = args.compression_rate
 print(f"scale is {compression_rate}")
 #####################################
-model_en = MIMOUNet_encoder(scale=compression_rate).cuda()
-model_de = MIMOUNet_decoder(scale=compression_rate).cuda()
+model_en = MIMOUNetv2_encoder(scale=compression_rate).cuda()
+model_de = MIMOUNetv2_decoder(scale=compression_rate).cuda()
 model_rec = MIMOUNet().cuda()
 # net = Simple_Class_Net().cuda()
 model_dis = SimplePatchGAN().cuda()
@@ -59,19 +59,19 @@ net3 = GoogLeNet(num_classes=10).cuda()
 # net = DenseNet121()
 
 if args.checkpoint!=0:
-    PATH = f'./vgg_{str(compression_rate * 10)}.pth'
+    PATH = f'./vgg_{str(int(compression_rate))}.pth'
     net1.load_state_dict(torch.load(PATH))
-    PATH = f'./res_{str(compression_rate * 10)}.pth'
+    PATH = f'./res_{str(int(compression_rate))}.pth'
     net2.load_state_dict(torch.load(PATH))
-    PATH = f'./google_{str(compression_rate * 10)}.pth'
+    PATH = f'./google_{str(int(compression_rate))}.pth'
     net3.load_state_dict(torch.load(PATH))
-    PATH = f'./model_en_{str(compression_rate * 10)}.pth'
+    PATH = f'./model_en_{str(int(compression_rate))}.pth'
     model_en.load_state_dict(torch.load(PATH))
-    PATH = f'./model_de_{str(compression_rate * 10)}.pth'
+    PATH = f'./model_de_{str(int(compression_rate))}.pth'
     model_de.load_state_dict(torch.load(PATH))
-    PATH = f'./model_dis_{str(compression_rate * 10)}.pth'
+    PATH = f'./model_dis_{str(int(compression_rate))}.pth'
     model_dis.load_state_dict(torch.load(PATH))
-    PATH = f'./model_rec_{str(compression_rate * 10)}.pth'
+    PATH = f'./model_rec_{str(int(compression_rate))}.pth'
     model_rec.load_state_dict(torch.load(PATH))
 
 cw_loss = CWLoss(num_classes=10).cuda()
@@ -80,11 +80,11 @@ criterion = nn.CrossEntropyLoss().cuda()
 l1_loss = nn.SmoothL1Loss().cuda()
 bce_with_logits_loss = nn.BCEWithLogitsLoss().cuda()
 optimizer_dis = optim.AdamW(model_dis.parameters(),
-                                 lr=1e-4,betas=(0.9, 0.999), weight_decay=0.01)
+                                 lr=2e-4,betas=(0.9, 0.999), weight_decay=0.01)
 optimizer_en = optim.AdamW(model_en.parameters(),
-                                 lr=1e-4,betas=(0.9, 0.999), weight_decay=0.01)
+                                 lr=2e-4,betas=(0.9, 0.999), weight_decay=0.01)
 optimizer_de = optim.AdamW(model_de.parameters(),
-                                 lr=1e-4,betas=(0.9, 0.999), weight_decay=0.01)
+                                 lr=2e-4,betas=(0.9, 0.999), weight_decay=0.01)
 optimizer_net1 = optim.AdamW(net1.parameters(),
                                  lr=1e-3,betas=(0.9, 0.999), weight_decay=0.01)
 optimizer_net2 = optim.AdamW(net2.parameters(),
@@ -92,7 +92,7 @@ optimizer_net2 = optim.AdamW(net2.parameters(),
 optimizer_net3 = optim.AdamW(net3.parameters(),
                                  lr=1e-3,betas=(0.9, 0.999), weight_decay=0.01)
 optimizer_rec = optim.AdamW(model_rec.parameters(),
-                                 lr=1e-4,betas=(0.9, 0.999), weight_decay=0.01)
+                                 lr=2e-4,betas=(0.9, 0.999), weight_decay=0.01)
 
 for epoch in range(50):  # loop over the dataset multiple times
     with torch.enable_grad():
@@ -175,7 +175,7 @@ for epoch in range(50):  # loop over the dataset multiple times
             loss = loss_coarse+loss_recover
             loss += loss_g*0.01+loss_g1*0.01
             if epoch>=3 and psnr_forward>=psnr_thresh:
-                loss += -cls_weight*loss_cls_wrong+2*cls_weight*loss_cls_right
+                loss += -cls_weight*loss_cls_wrong+1*cls_weight*loss_cls_right
             loss.backward()
             optimizer_en.step()
             optimizer_dis.step()
@@ -217,22 +217,22 @@ for epoch in range(50):  # loop over the dataset multiple times
                 print('\nsaving sample ' + name)
                 images.save(name)
 
-        if epoch%10==9:
+        if epoch%5==4:
             print(f'saving model at epoch {epoch}')
 
-            PATH = f'./vgg_{str(compression_rate*10)}.pth'
+            PATH = f'./vgg_{str(int(compression_rate))}.pth'
             torch.save(net1.state_dict(), PATH)
-            PATH = f'./res_{str(compression_rate*10)}.pth'
+            PATH = f'./res_{str(int(compression_rate))}.pth'
             torch.save(net2.state_dict(), PATH)
-            PATH = f'./google_{str(compression_rate*10)}.pth'
+            PATH = f'./google_{str(int(compression_rate))}.pth'
             torch.save(net3.state_dict(), PATH)
-            PATH = f'./model_en_{str(compression_rate*10)}.pth'
+            PATH = f'./model_en_{str(int(compression_rate))}.pth'
             torch.save(model_en.state_dict(), PATH)
-            PATH = f'./model_de_{str(compression_rate*10)}.pth'
+            PATH = f'./model_de_{str(int(compression_rate))}.pth'
             torch.save(model_de.state_dict(), PATH)
-            PATH = f'./model_dis_{str(compression_rate*10)}.pth'
+            PATH = f'./model_dis_{str(int(compression_rate))}.pth'
             torch.save(model_dis.state_dict(), PATH)
-            ATH = f'./model_rec_{str(compression_rate * 10)}.pth'
+            ATH = f'./model_rec_{str(int(compression_rate))}.pth'
             torch.save(model_rec.state_dict(), PATH)
 
     ## eval
