@@ -9,14 +9,17 @@ from models.loss import CWLoss
 from models.class_models.vgg import VGG
 from models.class_models.resnet import ResNet18
 from models.class_models.googlenet import GoogLeNet
-from utils import stitch_images
+from utils import stitch_images, clamp_with_grad
 import torch.optim as optim
 import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-checkpoint', type=int, default=0.0, help='')
 parser.add_argument('-compression_rate', type=float, default=0.4, help='')
+parser.add_argument('-cls_weight', type=float, default=0.005, help='')
+parser.add_argument('-thresh', type=int, default=28, help='')
 args = parser.parse_args()
+print(args)
 
 transform = transforms.Compose(
     [transforms.ToTensor(),
@@ -37,8 +40,13 @@ testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
 classes = ('plane', 'car', 'bird', 'cat',
            'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
+########### Settings ################
+print_step, save_step = 50, 1000
+psnr_thresh = args.thresh # 28
+cls_weight = args.cls_weight #0.005
 compression_rate = args.compression_rate
 print(f"scale is {compression_rate}")
+#####################################
 model_en = MIMOUNet_encoder(compression_rate=compression_rate).cuda()
 model_de = MIMOUNet_decoder(compression_rate=compression_rate).cuda()
 model_rec = MIMOUNet().cuda()
@@ -128,7 +136,8 @@ with torch.enable_grad():
 
             encoded = model_en(inputs)
             decoded = model_de(encoded)
-            recovered = model_rec(decoded)
+            decoded_clamp = clamp_with_grad(decoded)
+            recovered = model_rec(decoded_clamp)
 
             gan_real = model_dis(inputs)
             gan_fake = model_dis(recovered.detach())
@@ -163,8 +172,8 @@ with torch.enable_grad():
 
             loss = loss_coarse+loss_recover
             loss += loss_g*0.01+loss_g1*0.01
-            if epoch>=3 and psnr_forward>=30:
-                loss += -0.005*loss_cls_wrong+0.01*loss_cls_right
+            if epoch>=3 and psnr_forward>=psnr_thresh:
+                loss += -cls_weight*loss_cls_wrong+2*cls_weight*loss_cls_right
             loss.backward()
             optimizer_en.step()
             optimizer_dis.step()
@@ -181,7 +190,6 @@ with torch.enable_grad():
             running_cls_right += loss_cls_right.item()
             running_cls_wrong += loss_cls_wrong.item()
 
-            print_step, save_step = 50, 1000
             if i % print_step == print_step-1:    # print every 2000 mini-batches
                 print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / print_step:.5f} '
                       f'gan: {running_gan / print_step:.5f} '
@@ -202,6 +210,10 @@ with torch.enable_grad():
                     postprocess(recovered),
                     img_per_row=1
                 )
+
+                name = f'./img/{str(epoch)}_{str(int(compression_rate*10))}.png'
+                print('\nsaving sample ' + name)
+                images.save(name)
 
         if epoch%10==9:
             print(f'saving model at epoch {epoch}')

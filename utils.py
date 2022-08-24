@@ -1,6 +1,11 @@
 import time
 import numpy as np
 from PIL import Image
+import torch
+
+def clamp_with_grad(tensor):
+    tensor_clamp = torch.clamp(tensor, 0, 1)
+    return tensor + (tensor_clamp - tensor).clone().detach()
 
 def stitch_images(inputs, *outputs, img_per_row=2):
     gap = 5
