@@ -2,8 +2,8 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 import torch.nn as nn
-from models.MIMOUNet import MIMOUNet_encoder, MIMOUNet_decoder, \
-    MIMOUNet, Simple_Class_Net, SimplePatchGAN, MIMOUNetv2_decoder, MIMOUNetv2_encoder
+from models.MIMOUNet import MIMOUNet_encoder, MIMOUNet_decoder, MIMOUNet, Simple_Class_Net, SimplePatchGAN, \
+    MIMOUNetv2_decoder, MIMOUNetv2_encoder, MIMOUNetv2
 from metrics import PSNR, postprocess
 from models.loss import CWLoss
 from models.class_models.vgg import VGG
@@ -25,7 +25,7 @@ transform = transforms.Compose(
     [transforms.ToTensor(),
      transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-batch_size = 64
+batch_size = 32
 print("using CIFAR10")
 trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
                                         download=True, transform=transform)
@@ -49,7 +49,7 @@ print(f"scale is {compression_rate}")
 #####################################
 model_en = MIMOUNetv2_encoder(scale=compression_rate).cuda()
 model_de = MIMOUNetv2_decoder(scale=compression_rate).cuda()
-model_rec = MIMOUNet().cuda()
+model_rec = MIMOUNetv2(scale=compression_rate).cuda()
 # net = Simple_Class_Net().cuda()
 model_dis = SimplePatchGAN().cuda()
 net1 = VGG('VGG19', num_classes=10).cuda()
@@ -138,7 +138,7 @@ for epoch in range(50):  # loop over the dataset multiple times
             encoded = model_en(inputs)
             decoded = model_de(encoded)
             # decoded_clamp = clamp_with_grad(decoded)
-            recovered = model_rec(decoded)
+            recovered = model_rec(decoded, encoded)
             # recovered_clamp = clamp_with_grad(recovered)
 
             gan_real = model_dis(inputs)
@@ -256,7 +256,7 @@ for epoch in range(50):  # loop over the dataset multiple times
             encoded = model_en(inputs)
             decoded = model_de(encoded)
             # decoded_clamp = clamp_with_grad(decoded)
-            recovered = model_rec(decoded)
+            recovered = model_rec(decoded, encoded)
             # recovered_clamp = clamp_with_grad(recovered)
 
             psnr_forward = psnr(postprocess(decoded), postprocess(inputs)).item()

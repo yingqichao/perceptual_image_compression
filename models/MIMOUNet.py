@@ -145,11 +145,7 @@ class MIMOUNet(nn.Module):
         self.SCM2 = SCM(base_channel * 2)
 
     def forward(self, x):
-        """
-        注意：SCM没啥卵用，FAM也就一个AdaIn而已，AFF就是一个把三个不同尺度feature resize一下拼一起卷积，都没啥卵用
-        :param x:
-        :return:
-        """
+
         x_2 = F.interpolate(x, scale_factor=0.5)
         x_4 = F.interpolate(x_2, scale_factor=0.5)
         z2 = self.SCM2(x_2)
@@ -471,13 +467,6 @@ class MIMOUNetv2_encoder(nn.Module):
             BasicConv(base_channel * 2, base_channel, kernel_size=1, relu=True, stride=1),
         ])
 
-        self.ConvsOut = nn.ModuleList(
-            [
-                BasicConv(base_channel * 4, 3, kernel_size=3, relu=False, norm=False, stride=1),
-                BasicConv(base_channel * 2, 3, kernel_size=3, relu=False, norm=False, stride=1),
-            ]
-        )
-
         # self.AFFs = nn.ModuleList([
         #     AFF(base_channel * 7, out_channel=1),
         #     AFF(base_channel * 7, out_channel=1)
@@ -585,18 +574,6 @@ class MIMOUNetv2_decoder(nn.Module):
             BasicConv(base_channel * 2, base_channel, kernel_size=1, relu=True, stride=1), # 2
         ])
 
-        self.ConvsOut = nn.ModuleList(
-            [
-                BasicConv(base_channel * 4, 3, kernel_size=3, relu=False, norm=False, stride=1),
-                BasicConv(base_channel * 2, 3, kernel_size=3, relu=False, norm=False, stride=1),
-            ]
-        )
-
-        self.AFFs = nn.ModuleList([
-            AFF(base_channel * 7, base_channel*1),
-            AFF(base_channel * 7, base_channel*2)
-        ])
-
         self.se_attention_AFF1 = SEAttention(channel=base_channel * 4)
         self.se_attention_AFF2 = SEAttention(channel=base_channel * 2)
 
@@ -638,6 +615,159 @@ class MIMOUNetv2_decoder(nn.Module):
         outputs = self.feat_extract[5](z)
 
         return torch.tanh(outputs)
+
+
+class MIMOUNetv2(nn.Module):
+    def __init__(self, num_res=8, scale=32, compression_rate=0.5):
+        super(MIMOUNetv2, self).__init__()
+        self.compression_rate = compression_rate
+        base_channel = 32
+        scale = scale / 32
+
+        original_scale = scale * scale * (0.25 * 0.25 + 0.5 * 0.5 + 1) / 3
+        # further_scaling = compression_rate / original_scale
+        print(f"Current s: {original_scale}")
+        # print(f"further scaling factor:{further_scaling}")
+        self.index1 = int(32 * 32 * scale * scale)
+        self.index2 = int(16 * 16 * scale * scale)
+        self.index3 = int(8 * 8 * scale * scale)
+
+        # self.policy_network = nn.Sequential(
+        #     nn.Linear(self.index1+self.index2+self.index3,self.index1+self.index2+self.index3),
+        #     nn.ELU(inplace=True),
+        #     nn.Linear(self.index1 + self.index2 + self.index3, 4),
+        # )
+
+        self.scale = 1 / scale
+
+        self.Encoder = nn.ModuleList([
+            EBlock(base_channel, num_res),
+            EBlock(base_channel*2, num_res),
+            EBlock(base_channel*4, num_res),
+        ])
+
+        self.feat_extract = nn.ModuleList([
+            BasicConv(3, base_channel, kernel_size=3, relu=True, stride=1),
+            BasicConv(base_channel, base_channel*2, kernel_size=3, relu=True, stride=2),
+            BasicConv(base_channel*2, base_channel*4, kernel_size=3, relu=True, stride=2),
+            BasicConv(base_channel*4, base_channel*2, kernel_size=4, relu=True, stride=2, transpose=True),
+            BasicConv(base_channel*2, base_channel, kernel_size=4, relu=True, stride=2, transpose=True),
+            BasicConv(base_channel, 3, kernel_size=3, relu=False, norm=False, stride=1)
+        ])
+
+        self.Decoder = nn.ModuleList([
+            DBlock(base_channel * 4, num_res),
+            DBlock(base_channel * 2, num_res),
+            DBlock(base_channel, num_res)
+        ])
+
+        self.Convs = nn.ModuleList([
+            BasicConv(base_channel * 4, base_channel * 2, kernel_size=1, relu=True, stride=1),
+            BasicConv(base_channel * 2, base_channel, kernel_size=1, relu=True, stride=1),
+        ])
+
+        # self.AFFs = nn.ModuleList([
+        #     AFF(base_channel * (7+1), base_channel*1),
+        #     AFF(base_channel * (7+2), base_channel*2),
+        #     AFF(base_channel * (4+4), base_channel * 4)
+        # ])
+
+        self.AFF1_with_SE = nn.Sequential(
+            BasicConv(base_channel * (7+1), base_channel, kernel_size=3, stride=1, relu=True),
+            BasicConv(base_channel, base_channel*1, kernel_size=1, stride=1, relu=False, norm=False)
+        )
+        self.AFF2_with_SE = nn.Sequential(
+            BasicConv(base_channel * (7+2), base_channel*2, kernel_size=3, stride=1, relu=True),
+            BasicConv(base_channel*2, base_channel * 2, kernel_size=1, stride=1, relu=False, norm=False)
+        )
+        self.AFF3_with_SE = nn.Sequential(
+            BasicConv(base_channel * (4+4), base_channel*4, kernel_size=3, stride=1, relu=True),
+            BasicConv(base_channel*4, base_channel * 4, kernel_size=1, stride=1, relu=False, norm=False)
+        )
+
+        self.se_attention_AFF1 = SEAttention(channel=base_channel * (7+1))
+        self.se_attention_AFF2 = SEAttention(channel=base_channel * (7+2))
+        self.se_attention_AFF3 = SEAttention(channel=base_channel * (4+4))
+
+        self.conv1x1_4 = BasicConv(1, base_channel, kernel_size=1, stride=1, relu=False, norm=False)
+        self.conv1x1_2 = BasicConv(1, base_channel * 2, kernel_size=1, stride=1, relu=False, norm=False)
+        self.conv1x1_1 = BasicConv(1, base_channel * 4, kernel_size=1, stride=1, relu=False, norm=False)
+
+        self.FAM1 = FAM(base_channel * 4)
+        self.SCM1 = SCM(base_channel * 4)
+        self.FAM2 = FAM(base_channel * 2)
+        self.SCM2 = SCM(base_channel * 2)
+
+    def forward(self, x, input_tensor):
+        batchsize, _ = input_tensor.shape
+
+        x_2 = F.interpolate(x, scale_factor=0.5)
+        x_4 = F.interpolate(x_2, scale_factor=0.5)
+        z2 = self.SCM2(x_2)
+        z4 = self.SCM1(x_4)
+
+        # outputs = list()
+
+        x_ = self.feat_extract[0](x)
+        res1 = self.Encoder[0](x_)
+
+        z = self.feat_extract[1](res1)
+        z = self.FAM2(z, z2)
+        res2 = self.Encoder[1](z)
+
+        z = self.feat_extract[2](res2)
+        z = self.FAM1(z, z4)
+        z = self.Encoder[2](z)
+
+        z12 = F.interpolate(res1, scale_factor=0.5)
+        z21 = F.interpolate(res2, scale_factor=2)
+        z42 = F.interpolate(z, scale_factor=2)
+        z41 = F.interpolate(z42, scale_factor=2)
+
+        ###### auxiliary information from the input_tensor
+        res1_aux = input_tensor[:, :self.index1].view(-1, 1, int(32 / self.scale), int(32 / self.scale))
+        res2_aux = input_tensor[:, self.index1:self.index1 + self.index2].view(-1, 1, int(16 / self.scale),
+                                                                               int(16 / self.scale))
+        z_aux = input_tensor[:, self.index1 + self.index2:].view(-1, 1, int(8 / self.scale), int(8 / self.scale))
+
+        res1_aux = self.conv1x1_4(res1_aux)
+        res2_aux = self.conv1x1_2(res2_aux)
+        z_aux = self.conv1x1_1(z_aux)
+        if self.scale != 1:
+            res1_aux = F.interpolate(res1_aux, size=(32, 32))
+            res2_aux = F.interpolate(res2_aux, size=(16, 16))
+            z_aux = F.interpolate(z_aux, size=(8, 8))
+
+        # z = self.AFFs[2](z, z_aux)
+        # res2 = self.AFFs[1](z12, res2, z42, res2_aux)
+        # res1 = self.AFFs[0](res1, z21, z41, res1_aux)
+        res1 = self.se_attention_AFF1(torch.cat((res1, z21, z41, res1_aux), dim=1))
+        res1 = self.AFF1_with_SE(res1)
+        res2 = self.se_attention_AFF2(torch.cat((z12, res2, z42, res2_aux), dim=1))
+        res2 = self.AFF2_with_SE(res2)
+        z = self.se_attention_AFF3(torch.cat((z, z_aux), dim=1))
+        z = self.AFF3_with_SE(z)
+
+        z = self.Decoder[0](z)
+        # z_ = self.ConvsOut[0](z)
+        z = self.feat_extract[3](z)
+        # outputs.append(z_+x_4)
+
+        z = torch.cat([z, res2], dim=1)
+        z = self.Convs[0](z)
+        z = self.Decoder[1](z)
+        # z_ = self.ConvsOut[1](z)
+        z = self.feat_extract[4](z)
+        # outputs.append(z_+x_2)
+
+        z = torch.cat([z, res1], dim=1)
+        z = self.Convs[1](z)
+        z = self.Decoder[2](z)
+        z = self.feat_extract[5](z)
+        # outputs.append(z+x)
+
+        return x+torch.tanh(z)
+
 
 
 class MIMOUNetPlus(nn.Module):
