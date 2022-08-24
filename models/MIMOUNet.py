@@ -210,19 +210,19 @@ class MIMOUNet_encoder(nn.Module):
 
         self.MLP1 = nn.Sequential(
             nn.Linear(int(32 * 32 * scale * scale), int(32 * 32 * scale * scale)),
-            nn.BatchNorm1d(int(32 * 32 * scale * scale)),
+            # nn.BatchNorm1d(int(32 * 32 * scale * scale)),
             nn.ELU(inplace=True),
             nn.Linear(int(32*32*scale*scale),int(32*32*scale*scale*further_scaling))
         )
         self.MLP2 = nn.Sequential(
             nn.Linear(int(16 * 16 * scale * scale), int(16 * 16 * scale * scale)),
-            nn.BatchNorm1d(int(16 * 16 * scale * scale)),
+            # nn.BatchNorm1d(int(16 * 16 * scale * scale)),
             nn.ELU(inplace=True),
             nn.Linear(int(16*16*scale*scale),int(16*16*scale*scale*further_scaling))
         )
         self.MLP3 = nn.Sequential(
             nn.Linear(int(8 * 8 * scale * scale), int(8 * 8 * scale * scale)),
-            nn.BatchNorm1d(int(8 * 8 * scale * scale)),
+            # nn.BatchNorm1d(int(8 * 8 * scale * scale)),
             nn.ELU(inplace=True),
             nn.Linear(int(8*8*scale*scale),int(8*8*scale*scale*further_scaling))
         )
@@ -323,19 +323,19 @@ class MIMOUNet_decoder(nn.Module):
 
         self.MLP1 = nn.Sequential(
             nn.Linear(self.index1, self.index1),
-            nn.BatchNorm1d(self.index1),
+            # nn.BatchNorm1d(self.index1),
             nn.ELU(inplace=True),
             nn.Linear(self.index1,int(32*32*scale*scale))
         )
         self.MLP2 = nn.Sequential(
             nn.Linear(self.index2, self.index2),
-            nn.BatchNorm1d(self.index2),
+            # nn.BatchNorm1d(self.index2),
             nn.ELU(inplace=True),
             nn.Linear(self.index2,int(16*16*scale*scale))
         )
         self.MLP3 = nn.Sequential(
             nn.Linear(self.index3, self.index3),
-            nn.BatchNorm1d(self.index3),
+            # nn.BatchNorm1d(self.index3),
             nn.ELU(inplace=True),
             nn.Linear(self.index3,int(8*8*scale*scale))
         )

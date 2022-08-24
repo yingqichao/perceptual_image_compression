@@ -25,14 +25,14 @@ transform = transforms.Compose(
     [transforms.ToTensor(),
      transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-batch_size = 32
-
-trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
+batch_size = 64
+print("using CIFAR100")
+trainset = torchvision.datasets.CIFAR100(root='./data', train=True,
                                         download=True, transform=transform)
 trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
                                           shuffle=True, num_workers=2)
 
-testset = torchvision.datasets.CIFAR10(root='./data', train=False,
+testset = torchvision.datasets.CIFAR100(root='./data', train=False,
                                        download=True, transform=transform)
 testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
                                          shuffle=False, num_workers=2)
@@ -41,7 +41,7 @@ classes = ('plane', 'car', 'bird', 'cat',
            'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
 ########### Settings ################
-print_step, save_step = 50, 1000
+print_step, save_step = 50, 750
 psnr_thresh = args.thresh # 28
 cls_weight = args.cls_weight #0.005
 compression_rate = args.compression_rate
@@ -52,10 +52,10 @@ model_de = MIMOUNet_decoder(compression_rate=compression_rate).cuda()
 model_rec = MIMOUNet().cuda()
 # net = Simple_Class_Net().cuda()
 model_dis = SimplePatchGAN().cuda()
-net1 = VGG('VGG19').cuda()
-net2 = ResNet18().cuda()
+net1 = VGG('VGG19', num_classes=100).cuda()
+net2 = ResNet18(num_classes=100).cuda()
 # net = PreActResNet18()
-net3 = GoogLeNet().cuda()
+net3 = GoogLeNet(num_classes=100).cuda()
 # net = DenseNet121()
 
 if args.checkpoint!=0:
@@ -74,7 +74,7 @@ if args.checkpoint!=0:
     PATH = f'./model_rec_{str(compression_rate * 10)}.pth'
     model_rec.load_state_dict(torch.load(PATH))
 
-cw_loss = CWLoss(num_classes=10).cuda()
+cw_loss = CWLoss(num_classes=100).cuda()
 psnr = PSNR(255.0).cuda()
 criterion = nn.CrossEntropyLoss().cuda()
 l1_loss = nn.SmoothL1Loss().cuda()
@@ -86,15 +86,16 @@ optimizer_en = optim.AdamW(model_en.parameters(),
 optimizer_de = optim.AdamW(model_de.parameters(),
                                  lr=2e-4,betas=(0.9, 0.999), weight_decay=0.01)
 optimizer_net1 = optim.AdamW(net1.parameters(),
-                                 lr=2e-4,betas=(0.9, 0.999), weight_decay=0.01)
+                                 lr=1e-3,betas=(0.9, 0.999), weight_decay=0.01)
 optimizer_net2 = optim.AdamW(net2.parameters(),
-                                 lr=2e-4,betas=(0.9, 0.999), weight_decay=0.01)
+                                 lr=1e-3,betas=(0.9, 0.999), weight_decay=0.01)
 optimizer_net3 = optim.AdamW(net3.parameters(),
-                                 lr=2e-4,betas=(0.9, 0.999), weight_decay=0.01)
+                                 lr=1e-3,betas=(0.9, 0.999), weight_decay=0.01)
 optimizer_rec = optim.AdamW(model_rec.parameters(),
                                  lr=2e-4,betas=(0.9, 0.999), weight_decay=0.01)
-with torch.enable_grad():
-    for epoch in range(100):  # loop over the dataset multiple times
+
+for epoch in range(100):  # loop over the dataset multiple times
+    with torch.enable_grad():
         model_dis.train()
         model_de.train()
         model_rec.train()
@@ -234,64 +235,64 @@ with torch.enable_grad():
             ATH = f'./model_rec_{str(compression_rate * 10)}.pth'
             torch.save(model_rec.state_dict(), PATH)
 
-        ## eval
-        print(f'-------------- Start Evaluating Epoch {epoch} ------------------')
-        running_loss, running_gan, running_coarse, running_recover = 0.0, 0.0, 0.0, 0.0
-        running_cls1, running_cls2, running_cls3 = 0.0, 0.0, 0.0
-        running_cls_wrong, running_cls_right = 0.0, 0.0
-        with torch.no_grad():
-            model_dis.eval()
-            model_de.eval()
-            model_rec.eval()
-            model_en.eval()
-            net1.eval()
-            net2.eval()
-            net3.eval()
-            sum_batches = len(testloader)
-            for i, data in enumerate(testloader, 0):
-                inputs, labels = data
-                inputs, labels = inputs.cuda(), labels.cuda()
+    ## eval
+    print(f'-------------- Start Evaluating Epoch {epoch} ------------------')
+    running_loss, running_gan, running_coarse, running_recover = 0.0, 0.0, 0.0, 0.0
+    running_cls1, running_cls2, running_cls3 = 0.0, 0.0, 0.0
+    running_cls_wrong, running_cls_right = 0.0, 0.0
+    with torch.no_grad():
+        model_dis.eval()
+        model_de.eval()
+        model_rec.eval()
+        model_en.eval()
+        net1.eval()
+        net2.eval()
+        net3.eval()
+        sum_batches = len(testloader)
+        for i, data in enumerate(testloader, 0):
+            inputs, labels = data
+            inputs, labels = inputs.cuda(), labels.cuda()
 
-                encoded = model_en(inputs)
-                decoded = model_de(encoded)
-                decoded_clamp = clamp_with_grad(decoded)
-                recovered = model_rec(decoded)
-                recovered_clamp = clamp_with_grad(recovered)
+            encoded = model_en(inputs)
+            decoded = model_de(encoded)
+            decoded_clamp = clamp_with_grad(decoded)
+            recovered = model_rec(decoded)
+            recovered_clamp = clamp_with_grad(recovered)
 
-                psnr_forward = psnr(postprocess(decoded_clamp), postprocess(inputs)).item()
-                psnr_backward = psnr(postprocess(recovered_clamp), postprocess(inputs)).item()
-                _, argmax = torch.max(net1(inputs), 1)
-                running_cls1 += (labels == argmax.squeeze()).float().mean()
-                _, argmax = torch.max(net2(inputs), 1)
-                running_cls2 += (labels == argmax.squeeze()).float().mean()
-                _, argmax = torch.max(net3(inputs), 1)
-                running_cls3 += (labels == argmax.squeeze()).float().mean()
-                _, argmax = torch.max(net1(decoded), 1)
-                running_cls_wrong += (labels == argmax.squeeze()).float().mean()
-                _, argmax = torch.max(net2(decoded), 1)
-                running_cls_wrong += (labels == argmax.squeeze()).float().mean()
-                _, argmax = torch.max(net3(decoded), 1)
-                running_cls_wrong += (labels == argmax.squeeze()).float().mean()
-                _, argmax = torch.max(net1(recovered), 1)
-                running_cls_right += (labels == argmax.squeeze()).float().mean()
-                _, argmax = torch.max(net2(recovered), 1)
-                running_cls_right += (labels == argmax.squeeze()).float().mean()
-                _, argmax = torch.max(net3(recovered), 1)
-                running_cls_right += (labels == argmax.squeeze()).float().mean()
+            psnr_forward = psnr(postprocess(decoded_clamp), postprocess(inputs)).item()
+            psnr_backward = psnr(postprocess(recovered_clamp), postprocess(inputs)).item()
+            _, argmax = torch.max(net1(inputs), 1)
+            running_cls1 += (labels == argmax.squeeze()).float().mean()
+            _, argmax = torch.max(net2(inputs), 1)
+            running_cls2 += (labels == argmax.squeeze()).float().mean()
+            _, argmax = torch.max(net3(inputs), 1)
+            running_cls3 += (labels == argmax.squeeze()).float().mean()
+            _, argmax = torch.max(net1(decoded), 1)
+            running_cls_wrong += (labels == argmax.squeeze()).float().mean()
+            _, argmax = torch.max(net2(decoded), 1)
+            running_cls_wrong += (labels == argmax.squeeze()).float().mean()
+            _, argmax = torch.max(net3(decoded), 1)
+            running_cls_wrong += (labels == argmax.squeeze()).float().mean()
+            _, argmax = torch.max(net1(recovered), 1)
+            running_cls_right += (labels == argmax.squeeze()).float().mean()
+            _, argmax = torch.max(net2(recovered), 1)
+            running_cls_right += (labels == argmax.squeeze()).float().mean()
+            _, argmax = torch.max(net3(recovered), 1)
+            running_cls_right += (labels == argmax.squeeze()).float().mean()
 
-                running_coarse += psnr_forward
-                running_recover += psnr_backward
+            running_coarse += psnr_forward
+            running_recover += psnr_backward
 
-            running_cls_right /= 3
-            running_cls_wrong /= 3
-            print(f'[{epoch + 1}, {i + 1:5d}] '
-                  f'recover: {running_recover / sum_batches:.5f} '
-                  f'vgg: {running_cls1 / sum_batches:.5f} '
-                  f'res: {running_cls2 / sum_batches:.5f} '
-                  f'goo: {running_cls3 / sum_batches:.5f} '
-                  f'coarse: {running_coarse / sum_batches:.5f} '
-                  f'cls_wrong: {running_cls_wrong / sum_batches:.5f} '
-                  f'cls_right: {running_cls_right / sum_batches:.5f} ')
+        running_cls_right /= 3
+        running_cls_wrong /= 3
+        print(f'[{epoch + 1}, {i + 1:5d}] '
+              f'recover: {running_recover / sum_batches:.5f} '
+              f'vgg: {running_cls1 / sum_batches:.5f} '
+              f'res: {running_cls2 / sum_batches:.5f} '
+              f'goo: {running_cls3 / sum_batches:.5f} '
+              f'coarse: {running_coarse / sum_batches:.5f} '
+              f'cls_wrong: {running_cls_wrong / sum_batches:.5f} '
+              f'cls_right: {running_cls_right / sum_batches:.5f} ')
 
 # dataiter = iter(testloader)
 # images, labels = dataiter.next()
