@@ -197,35 +197,35 @@ class MIMOUNet(nn.Module):
         return z
 
 class MIMOUNet_encoder(nn.Module):
-    def __init__(self, num_res=8, scale=1.0, compression_rate=0.5):
+    def __init__(self, num_res=8, scale=32, compression_rate=1.0):
         super(MIMOUNet_encoder, self).__init__()
-        self.scale = scale
+        self.scale = scale/32.0
         self.compression_rate = compression_rate
         base_channel = 32
 
-        original_scale = scale*scale*(0.25*0.25+0.5*0.5+1)/3
-        further_scaling = compression_rate/original_scale
-        print(f"Current s: {compression_rate}")
-        print(f"further scaling factor:{further_scaling}")
+        original_scale = self.scale*self.scale*(0.25*0.25+0.5*0.5+1)/3
+        # further_scaling = compression_rate/original_scale
+        print(f"Current s: {original_scale}")
+        # print(f"further scaling factor:{further_scaling}")
 
-        self.MLP1 = nn.Sequential(
-            nn.Linear(int(32 * 32 * scale * scale), int(32 * 32 * scale * scale)),
-            # nn.BatchNorm1d(int(32 * 32 * scale * scale)),
-            nn.ELU(inplace=True),
-            nn.Linear(int(32*32*scale*scale),int(32*32*scale*scale*further_scaling))
-        )
-        self.MLP2 = nn.Sequential(
-            nn.Linear(int(16 * 16 * scale * scale), int(16 * 16 * scale * scale)),
-            # nn.BatchNorm1d(int(16 * 16 * scale * scale)),
-            nn.ELU(inplace=True),
-            nn.Linear(int(16*16*scale*scale),int(16*16*scale*scale*further_scaling))
-        )
-        self.MLP3 = nn.Sequential(
-            nn.Linear(int(8 * 8 * scale * scale), int(8 * 8 * scale * scale)),
-            # nn.BatchNorm1d(int(8 * 8 * scale * scale)),
-            nn.ELU(inplace=True),
-            nn.Linear(int(8*8*scale*scale),int(8*8*scale*scale*further_scaling))
-        )
+        # self.MLP1 = nn.Sequential(
+        #     nn.Linear(int(32 * 32 * scale * scale), int(32 * 32 * scale * scale)),
+        #     # nn.BatchNorm1d(int(32 * 32 * scale * scale)),
+        #     nn.ELU(inplace=True),
+        #     nn.Linear(int(32*32*scale*scale),int(32*32*scale*scale*further_scaling))
+        # )
+        # self.MLP2 = nn.Sequential(
+        #     nn.Linear(int(16 * 16 * scale * scale), int(16 * 16 * scale * scale)),
+        #     # nn.BatchNorm1d(int(16 * 16 * scale * scale)),
+        #     nn.ELU(inplace=True),
+        #     nn.Linear(int(16*16*scale*scale),int(16*16*scale*scale*further_scaling))
+        # )
+        # self.MLP3 = nn.Sequential(
+        #     nn.Linear(int(8 * 8 * scale * scale), int(8 * 8 * scale * scale)),
+        #     # nn.BatchNorm1d(int(8 * 8 * scale * scale)),
+        #     nn.ELU(inplace=True),
+        #     nn.Linear(int(8*8*scale*scale),int(8*8*scale*scale*further_scaling))
+        # )
         self.Encoder = nn.ModuleList([
             EBlock(base_channel, num_res),
             EBlock(base_channel*2, num_res),
@@ -299,48 +299,49 @@ class MIMOUNet_encoder(nn.Module):
         res2 = F.interpolate(res2, scale_factor=1 * self.scale) if 1 * self.scale != 1 else res2
         z = F.interpolate(z, scale_factor=1 * self.scale) if 1 * self.scale != 1 else z
 
-        res1 = self.MLP1(self.AFFs[0](res1, z21, z41).view(batchsize, -1))
-        res2 = self.MLP2(self.AFFs[1](z12, res2, z42).view(batchsize,-1))
-        z = self.MLP3(self.conv1x1(z).view(batchsize,-1))
+        res1 = self.AFFs[0](res1, z21, z41).view(batchsize, -1)
+        res2 = self.AFFs[1](z12, res2, z42).view(batchsize,-1)
+        z = self.conv1x1(z).view(batchsize,-1)
 
         outputs = torch.concat((res1,res2,z),dim=1)
 
         return outputs
 
 class MIMOUNet_decoder(nn.Module):
-    def __init__(self, num_res=8,scale=1.0,compression_rate=0.5):
+    def __init__(self, num_res=8,scale=32,compression_rate=0.5):
         super(MIMOUNet_decoder, self).__init__()
         self.compression_rate = compression_rate
         base_channel = 32
+        scale = scale/32
 
         original_scale = scale * scale * (0.25 * 0.25 + 0.5 * 0.5 + 1) / 3
-        further_scaling = compression_rate / original_scale
-        print(f"Current s: {compression_rate}")
-        print(f"further scaling factor:{further_scaling}")
-        self.index1 = int(32 * 32 * scale * scale * further_scaling)
-        self.index2 = int(16 * 16 * scale * scale * further_scaling)
-        self.index3 = int(8 * 8 * scale * scale * further_scaling)
+        # further_scaling = compression_rate / original_scale
+        print(f"Current s: {original_scale}")
+        # print(f"further scaling factor:{further_scaling}")
+        self.index1 = int(32 * 32 * scale * scale)
+        self.index2 = int(16 * 16 * scale * scale)
+        self.index3 = int(8 * 8 * scale * scale)
 
-        self.MLP1 = nn.Sequential(
-            nn.Linear(self.index1, self.index1),
-            # nn.BatchNorm1d(self.index1),
-            nn.ELU(inplace=True),
-            nn.Linear(self.index1,int(32*32*scale*scale))
-        )
-        self.MLP2 = nn.Sequential(
-            nn.Linear(self.index2, self.index2),
-            # nn.BatchNorm1d(self.index2),
-            nn.ELU(inplace=True),
-            nn.Linear(self.index2,int(16*16*scale*scale))
-        )
-        self.MLP3 = nn.Sequential(
-            nn.Linear(self.index3, self.index3),
-            # nn.BatchNorm1d(self.index3),
-            nn.ELU(inplace=True),
-            nn.Linear(self.index3,int(8*8*scale*scale))
-        )
+        # self.MLP1 = nn.Sequential(
+        #     nn.Linear(self.index1, self.index1),
+        #     # nn.BatchNorm1d(self.index1),
+        #     nn.ELU(inplace=True),
+        #     nn.Linear(self.index1,int(32*32*scale*scale))
+        # )
+        # self.MLP2 = nn.Sequential(
+        #     nn.Linear(self.index2, self.index2),
+        #     # nn.BatchNorm1d(self.index2),
+        #     nn.ELU(inplace=True),
+        #     nn.Linear(self.index2,int(16*16*scale*scale))
+        # )
+        # self.MLP3 = nn.Sequential(
+        #     nn.Linear(self.index3, self.index3),
+        #     # nn.BatchNorm1d(self.index3),
+        #     nn.ELU(inplace=True),
+        #     nn.Linear(self.index3,int(8*8*scale*scale))
+        # )
 
-        self.scale = int(1 / scale)
+        self.scale = 1 / scale
         self.Encoder = nn.ModuleList([
             EBlock(base_channel, num_res),
             EBlock(base_channel*2, num_res),
@@ -390,9 +391,9 @@ class MIMOUNet_decoder(nn.Module):
 
     def forward(self, input_tensor):
         batchsize, _ = input_tensor.shape
-        res1 = self.MLP1(input_tensor[:,:self.index1]).view(-1, 1, int(32/self.scale),int(32/self.scale))
-        res2 = self.MLP2(input_tensor[:, self.index1:self.index1+self.index2]).view(-1, 1, int(16/self.scale), int(16/self.scale))
-        z = self.MLP3(input_tensor[:, self.index1+self.index2:]).view(-1, 1, int(8/self.scale), int(8/self.scale))
+        res1 = input_tensor[:,:self.index1].view(-1, 1, int(32/self.scale),int(32/self.scale))
+        res2 = input_tensor[:, self.index1:self.index1+self.index2].view(-1, 1, int(16/self.scale), int(16/self.scale))
+        z = input_tensor[:, self.index1+self.index2:].view(-1, 1, int(8/self.scale), int(8/self.scale))
 
         res1 = self.conv1x1_4(res1)
         res2 = self.conv1x1_2(res2)

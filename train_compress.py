@@ -15,7 +15,7 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-checkpoint', type=int, default=0.0, help='')
-parser.add_argument('-compression_rate', type=float, default=0.4, help='')
+parser.add_argument('-compression_rate', type=float, default=32, help='')
 parser.add_argument('-cls_weight', type=float, default=0.005, help='')
 parser.add_argument('-thresh', type=int, default=28, help='')
 args = parser.parse_args()
@@ -47,8 +47,8 @@ cls_weight = args.cls_weight #0.005
 compression_rate = args.compression_rate
 print(f"scale is {compression_rate}")
 #####################################
-model_en = MIMOUNet_encoder(compression_rate=compression_rate).cuda()
-model_de = MIMOUNet_decoder(compression_rate=compression_rate).cuda()
+model_en = MIMOUNet_encoder(scale=compression_rate).cuda()
+model_de = MIMOUNet_decoder(scale=compression_rate).cuda()
 model_rec = MIMOUNet().cuda()
 # net = Simple_Class_Net().cuda()
 model_dis = SimplePatchGAN().cuda()
