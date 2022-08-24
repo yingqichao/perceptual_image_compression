@@ -208,9 +208,24 @@ class MIMOUNet_encoder(nn.Module):
         print(f"Current s: {compression_rate}")
         print(f"further scaling factor:{further_scaling}")
 
-        self.MLP1 = nn.Linear(int(32*32*scale*scale),int(32*32*scale*scale*further_scaling))
-        self.MLP2 = nn.Linear(int(16 * 16 * scale * scale), int(16 * 16 * scale * scale * further_scaling))
-        self.MLP3 = nn.Linear(int(8 * 8 * scale * scale), int(8 * 8 * scale * scale * further_scaling))
+        self.MLP1 = nn.Sequential(
+            nn.Linear(int(32 * 32 * scale * scale), int(32 * 32 * scale * scale)),
+            nn.BatchNorm1d(int(32 * 32 * scale * scale)),
+            nn.ELU(inplace=True),
+            nn.Linear(int(32*32*scale*scale),int(32*32*scale*scale*further_scaling))
+        )
+        self.MLP2 = nn.Sequential(
+            nn.Linear(int(16 * 16 * scale * scale), int(16 * 16 * scale * scale)),
+            nn.BatchNorm1d(int(16 * 16 * scale * scale)),
+            nn.ELU(inplace=True),
+            nn.Linear(int(16*16*scale*scale),int(16*16*scale*scale*further_scaling))
+        )
+        self.MLP3 = nn.Sequential(
+            nn.Linear(int(8 * 8 * scale * scale), int(8 * 8 * scale * scale)),
+            nn.BatchNorm1d(int(8 * 8 * scale * scale)),
+            nn.ELU(inplace=True),
+            nn.Linear(int(8*8*scale*scale),int(8*8*scale*scale*further_scaling))
+        )
         self.Encoder = nn.ModuleList([
             EBlock(base_channel, num_res),
             EBlock(base_channel*2, num_res),
@@ -306,9 +321,24 @@ class MIMOUNet_decoder(nn.Module):
         self.index2 = int(16 * 16 * scale * scale * further_scaling)
         self.index3 = int(8 * 8 * scale * scale * further_scaling)
 
-        self.MLP1 = nn.Linear(self.index1,int(32*32*scale*scale))
-        self.MLP2 = nn.Linear(self.index2,int(16*16*scale*scale))
-        self.MLP3 = nn.Linear(self.index3,int(8*8*scale*scale))
+        self.MLP1 = nn.Sequential(
+            nn.Linear(self.index1, self.index1),
+            nn.BatchNorm1d(self.index1),
+            nn.ELU(inplace=True),
+            nn.Linear(self.index1,int(32*32*scale*scale))
+        )
+        self.MLP2 = nn.Sequential(
+            nn.Linear(self.index2, self.index2),
+            nn.BatchNorm1d(self.index2),
+            nn.ELU(inplace=True),
+            nn.Linear(self.index2,int(16*16*scale*scale))
+        )
+        self.MLP3 = nn.Sequential(
+            nn.Linear(self.index3, self.index3),
+            nn.BatchNorm1d(self.index3),
+            nn.ELU(inplace=True),
+            nn.Linear(self.index3,int(8*8*scale*scale))
+        )
 
         self.scale = int(1 / scale)
         self.Encoder = nn.ModuleList([

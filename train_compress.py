@@ -233,6 +233,64 @@ with torch.enable_grad():
             ATH = f'./model_rec_{str(compression_rate * 10)}.pth'
             torch.save(model_rec.state_dict(), PATH)
 
+        ## eval
+        print(f'-------------- Start Evaluating Epoch {epoch} ------------------')
+        running_loss, running_gan, running_coarse, running_recover = 0.0, 0.0, 0.0, 0.0
+        running_cls1, running_cls2, running_cls3 = 0.0, 0.0, 0.0
+        running_cls_wrong, running_cls_right = 0.0, 0.0
+        with torch.no_grad():
+            model_dis.eval()
+            model_de.eval()
+            model_rec.eval()
+            model_en.eval()
+            net1.eval()
+            net2.eval()
+            net3.eval()
+            sum_batches = len(testloader)
+            for i, data in enumerate(testloader, 0):
+                inputs, labels = data
+                inputs, labels = inputs.cuda(), labels.cuda()
+
+                encoded = model_en(inputs)
+                decoded = model_de(encoded)
+                decoded_clamp = clamp_with_grad(decoded)
+                recovered = model_rec(decoded_clamp)
+
+                psnr_forward = psnr(postprocess(decoded), postprocess(inputs)).item()
+                psnr_backward = psnr(postprocess(recovered), postprocess(inputs)).item()
+                _, argmax = torch.max(net1(inputs), 1)
+                running_cls1 += (labels == argmax.squeeze()).float().mean()
+                _, argmax = torch.max(net2(inputs), 1)
+                running_cls2 += (labels == argmax.squeeze()).float().mean()
+                _, argmax = torch.max(net3(inputs), 1)
+                running_cls3 += (labels == argmax.squeeze()).float().mean()
+                _, argmax = torch.max(net1(decoded), 1)
+                running_cls_wrong += (labels == argmax.squeeze()).float().mean()
+                _, argmax = torch.max(net2(decoded), 1)
+                running_cls_wrong += (labels == argmax.squeeze()).float().mean()
+                _, argmax = torch.max(net3(decoded), 1)
+                running_cls_wrong += (labels == argmax.squeeze()).float().mean()
+                _, argmax = torch.max(net1(recovered), 1)
+                running_cls_right += (labels == argmax.squeeze()).float().mean()
+                _, argmax = torch.max(net2(recovered), 1)
+                running_cls_right += (labels == argmax.squeeze()).float().mean()
+                _, argmax = torch.max(net3(recovered), 1)
+                running_cls_right += (labels == argmax.squeeze()).float().mean()
+
+                running_coarse += psnr_forward
+                running_recover += psnr_backward
+
+            running_cls_right /= 3
+            running_cls_wrong /= 3
+            print(f'[{epoch + 1}, {i + 1:5d}] '
+                  f'recover: {running_recover / sum_batches:.5f} '
+                  f'vgg: {running_cls1 / sum_batches:.5f} '
+                  f'res: {running_cls2 / sum_batches:.5f} '
+                  f'goo: {running_cls3 / sum_batches:.5f} '
+                  f'coarse: {running_coarse / sum_batches:.5f} '
+                  f'cls_wrong: {running_cls_wrong / sum_batches:.5f} '
+                  f'cls_right: {running_cls_right / sum_batches:.5f} ')
+
 # dataiter = iter(testloader)
 # images, labels = dataiter.next()
 

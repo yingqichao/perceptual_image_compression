@@ -19,7 +19,7 @@ class BasicConv(nn.Module):
         if norm:
             layers.append(nn.BatchNorm2d(out_channel))
         if relu:
-            layers.append(nn.ReLU(inplace=True))
+            layers.append(nn.ELU(inplace=True))
         self.main = nn.Sequential(*layers)
 
     def forward(self, x):
