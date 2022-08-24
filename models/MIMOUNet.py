@@ -437,6 +437,9 @@ class Simple_Class_Net(nn.Module):
 from models.SEAttention import SEAttention
 class MIMOUNetv2_encoder(nn.Module):
     def __init__(self, num_res=8, scale=32, compression_rate=1.0):
+        ### change logs
+        print("Added AFF3")
+
         super(MIMOUNetv2_encoder, self).__init__()
         self.scale = scale/32.0
         self.compression_rate = compression_rate
@@ -474,6 +477,7 @@ class MIMOUNetv2_encoder(nn.Module):
 
         self.se_attention_AFF1 = SEAttention(channel=base_channel * 7)
         self.se_attention_AFF2 = SEAttention(channel=base_channel * 7)
+        self.se_attention_AFF3 = SEAttention(channel=base_channel * 7)
 
         self.AFF1_with_SE = nn.Sequential(
             BasicConv(base_channel * 7, base_channel, kernel_size=3, stride=1, relu=True),
@@ -485,7 +489,12 @@ class MIMOUNetv2_encoder(nn.Module):
             BasicConv(base_channel, 1, kernel_size=1, stride=1, relu=False, norm=False)
         )
 
-        self.conv1x1 = BasicConv(base_channel*4, 1, kernel_size=1, stride=1, relu=False, norm=False)
+        self.AFF3_with_SE = nn.Sequential(
+            BasicConv(base_channel * 7, base_channel, kernel_size=3, stride=1, relu=True),
+            BasicConv(base_channel, 1, kernel_size=1, stride=1, relu=False, norm=False)
+        )
+
+        # self.conv1x1 = BasicConv(base_channel*4, 1, kernel_size=1, stride=1, relu=False, norm=False)
 
         self.FAM1 = FAM(base_channel * 4)
         self.SCM1 = SCM(base_channel * 4)
@@ -514,7 +523,9 @@ class MIMOUNetv2_encoder(nn.Module):
         z12 = F.interpolate(res1, scale_factor=0.5*self.scale) if 0.5*self.scale!=1 else res1
         z21 = F.interpolate(res2, scale_factor=2*self.scale) if 2*self.scale!=1 else res2
         z42 = F.interpolate(z, scale_factor=2*self.scale) if 2*self.scale!=1 else z
+        z24 = F.interpolate(res2, scale_factor=0.5 * self.scale) if 0.5 * self.scale != 1 else z
         z41 = F.interpolate(z, scale_factor=4*self.scale) if 4*self.scale!=1 else z42
+        z14 = F.interpolate(res1, scale_factor=0.25 * self.scale) if 0.25 * self.scale != 1 else res1
         res1 = F.interpolate(res1, scale_factor=1*self.scale) if 1*self.scale!=1 else res1
         res2 = F.interpolate(res2, scale_factor=1 * self.scale) if 1 * self.scale != 1 else res2
         z = F.interpolate(z, scale_factor=1 * self.scale) if 1 * self.scale != 1 else z
@@ -525,7 +536,9 @@ class MIMOUNetv2_encoder(nn.Module):
         res1 = self.AFF1_with_SE(res1).view(batchsize, -1)
         res2 = self.se_attention_AFF2(torch.cat((z12, res2, z42), dim=1))
         res2 = self.AFF2_with_SE(res2).view(batchsize, -1)
-        z = self.conv1x1(z).view(batchsize,-1)
+        # z = self.conv1x1(z).view(batchsize,-1)
+        z = self.se_attention_AFF3(torch.cat((z, z24, z14), dim=1))
+        z = self.AFF3_with_SE(z).view(batchsize, -1)
 
         outputs = torch.concat((res1,res2,z),dim=1)
 
@@ -591,7 +604,8 @@ class MIMOUNetv2_decoder(nn.Module):
         # policy = self.policy_network(input_tensor)
         res1 = input_tensor[:,:self.index1].view(-1, 1, int(32/self.scale),int(32/self.scale))
         res2 = input_tensor[:, self.index1:self.index1+self.index2].view(-1, 1, int(16/self.scale), int(16/self.scale))
-        z = input_tensor[:, self.index1+self.index2:].view(-1, 1, int(8/self.scale), int(8/self.scale))
+        ## randomly generate z for adversarial generation
+        z = torch.rand_like(input_tensor[:, self.index1+self.index2:]).view(-1, 1, int(8/self.scale), int(8/self.scale))
 
         res1 = self.conv1x1_4(res1)
         res2 = self.conv1x1_2(res2)
@@ -618,9 +632,10 @@ class MIMOUNetv2_decoder(nn.Module):
 
 
 class MIMOUNetv2(nn.Module):
-    def __init__(self, num_res=8, scale=32, compression_rate=0.5):
+    def __init__(self, num_res=8, scale=32, compression_rate=0.5, enemy=False):
         super(MIMOUNetv2, self).__init__()
         self.compression_rate = compression_rate
+        self.is_enemy = enemy
         base_channel = 32
         scale = scale / 32
 
@@ -681,24 +696,24 @@ class MIMOUNetv2(nn.Module):
             BasicConv(base_channel*2, base_channel * 2, kernel_size=1, stride=1, relu=False, norm=False)
         )
         self.AFF3_with_SE = nn.Sequential(
-            BasicConv(base_channel * (4), base_channel*4, kernel_size=3, stride=1, relu=True),
+            BasicConv(base_channel * (7+(4 if not enemy else 0)), base_channel*4, kernel_size=3, stride=1, relu=True),
             BasicConv(base_channel*4, base_channel * 4, kernel_size=1, stride=1, relu=False, norm=False)
         )
 
         self.se_attention_AFF1 = SEAttention(channel=base_channel * (7))
         self.se_attention_AFF2 = SEAttention(channel=base_channel * (7))
-        self.se_attention_AFF3 = SEAttention(channel=base_channel * (4))
+        self.se_attention_AFF3 = SEAttention(channel=base_channel * (7+(4 if not enemy else 0)))
 
         # self.conv1x1_4 = BasicConv(1, base_channel, kernel_size=1, stride=1, relu=False, norm=False)
         # self.conv1x1_2 = BasicConv(1, base_channel, kernel_size=1, stride=1, relu=False, norm=False)
-        # self.conv1x1_1 = BasicConv(1, base_channel, kernel_size=1, stride=1, relu=False, norm=False)
+        self.conv1x1_1 = BasicConv(1, base_channel*4, kernel_size=1, stride=1, relu=False, norm=False)
 
         self.FAM1 = FAM(base_channel * 4)
         self.SCM1 = SCM(base_channel * 4)
         self.FAM2 = FAM(base_channel * 2)
         self.SCM2 = SCM(base_channel * 2)
 
-    def forward(self, x):
+    def forward(self, x, input_tensor=None):
         batchsize, *_ = x.shape
 
         x_2 = F.interpolate(x, scale_factor=0.5)
@@ -723,20 +738,23 @@ class MIMOUNetv2(nn.Module):
         z21 = F.interpolate(res2, scale_factor=2)
         z42 = F.interpolate(z, scale_factor=2)
         z41 = F.interpolate(z42, scale_factor=2)
+        z24 = F.interpolate(res2, scale_factor=0.5)
+        z14 = F.interpolate(res1, scale_factor=0.25)
 
         ###### auxiliary information from the input_tensor
-        # res1_aux = input_tensor[:, :self.index1].view(-1, 1, int(32 / self.scale), int(32 / self.scale))
-        # res2_aux = input_tensor[:, self.index1:self.index1 + self.index2].view(-1, 1, int(16 / self.scale),
-        #                                                                        int(16 / self.scale))
-        # z_aux = input_tensor[:, self.index1 + self.index2:].view(-1, 1, int(8 / self.scale), int(8 / self.scale))
-        #
-        # res1_aux = self.conv1x1_4(res1_aux)
-        # res2_aux = self.conv1x1_2(res2_aux)
-        # z_aux = self.conv1x1_1(z_aux)
-        # if self.scale != 1:
-        #     res1_aux = F.interpolate(res1_aux, size=(32, 32))
-        #     res2_aux = F.interpolate(res2_aux, size=(16, 16))
-        #     z_aux = F.interpolate(z_aux, size=(8, 8))
+        if not self.is_enemy:
+            # res1_aux = input_tensor[:, :self.index1].view(-1, 1, int(32 / self.scale), int(32 / self.scale))
+            # res2_aux = input_tensor[:, self.index1:self.index1 + self.index2].view(-1, 1, int(16 / self.scale),
+            #                                                                        int(16 / self.scale))
+            z_aux = input_tensor[:, self.index1 + self.index2:].view(-1, 1, int(8 / self.scale), int(8 / self.scale))
+            #
+            # res1_aux = self.conv1x1_4(res1_aux)
+            # res2_aux = self.conv1x1_2(res2_aux)
+            z_aux = self.conv1x1_1(z_aux)
+            if self.scale != 1:
+            #     res1_aux = F.interpolate(res1_aux, size=(32, 32))
+            #     res2_aux = F.interpolate(res2_aux, size=(16, 16))
+                z_aux = F.interpolate(z_aux, size=(8, 8))
 
         # z = self.AFFs[2](z, z_aux)
         # res2 = self.AFFs[1](z12, res2, z42, res2_aux)
@@ -745,7 +763,10 @@ class MIMOUNetv2(nn.Module):
         res1 = self.AFF1_with_SE(res1)
         res2 = self.se_attention_AFF2(torch.cat((z12, res2, z42), dim=1))
         res2 = self.AFF2_with_SE(res2)
-        z = self.se_attention_AFF3(z)
+        if self.is_enemy:
+            z = self.se_attention_AFF3(torch.cat((z, z24, z14), dim=1))
+        else:
+            z = self.se_attention_AFF3(torch.cat((z, z24, z14, z_aux), dim=1))
         z = self.AFF3_with_SE(z)
 
         z = self.Decoder[0](z)

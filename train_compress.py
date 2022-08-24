@@ -51,7 +51,8 @@ classes = ('plane', 'car', 'bird', 'cat',
 
 model_en = MIMOUNetv2_encoder(scale=compression_rate).cuda()
 model_de = MIMOUNetv2_decoder(scale=compression_rate).cuda()
-model_rec = MIMOUNetv2(scale=compression_rate).cuda()
+model_rec = MIMOUNetv2(scale=compression_rate,enemy=False).cuda()
+model_enemy = MIMOUNetv2(scale=compression_rate,enemy=True).cuda()
 # net = Simple_Class_Net().cuda()
 model_dis = SimplePatchGAN().cuda()
 net1 = VGG('VGG19', num_classes=10).cuda()
@@ -76,6 +77,8 @@ if args.checkpoint!=0:
     model_dis.load_state_dict(torch.load(PATH))
     PATH = f'./model_rec_{str(int(compression_rate))}.pth'
     model_rec.load_state_dict(torch.load(PATH))
+    PATH = f'./model_enemy_{str(int(compression_rate))}.pth'
+    model_enemy.load_state_dict(torch.load(PATH))
 
 cw_loss = CWLoss(num_classes=10).cuda()
 psnr = PSNR(255.0).cuda()
@@ -96,9 +99,12 @@ optimizer_net3 = optim.AdamW(net3.parameters(),
                                  lr=1e-3)
 optimizer_rec = optim.AdamW(model_rec.parameters(),
                                  lr=2e-4)
+optimizer_enemy = optim.AdamW(model_enemy.parameters(),
+                                 lr=2e-4)
 
 for epoch in range(50):  # loop over the dataset multiple times
     with torch.enable_grad():
+        model_enemy.train()
         model_dis.train()
         model_de.train()
         model_rec.train()
@@ -109,11 +115,13 @@ for epoch in range(50):  # loop over the dataset multiple times
         running_loss, running_gan, running_coarse, running_recover = 0.0, 0.0, 0.0, 0.0
         running_cls1, running_cls2, running_cls3 = 0.0, 0.0, 0.0
         running_cls_wrong, running_cls_right = 0.0, 0.0
+        running_psnr_enemy, running_cls_enemy = 0.0, 0.0
         for i, data in enumerate(trainloader, 0):
             # get the inputs; data is a list of [inputs, labels]
             inputs, labels = data
             inputs, labels = inputs.cuda(), labels.cuda()
             # zero the parameter gradients
+            optimizer_enemy.zero_grad()
             optimizer_net1.zero_grad()
             optimizer_net2.zero_grad()
             optimizer_net3.zero_grad()
@@ -126,23 +134,52 @@ for epoch in range(50):  # loop over the dataset multiple times
             loss_cls1 = criterion(net1(inputs), labels)
             loss_cls1.backward()
             optimizer_net1.step()
-            optimizer_net1.zero_grad()
+            # optimizer_net1.zero_grad()
             ##
             loss_cls2 = criterion(net2(inputs), labels)
             loss_cls2.backward()
             optimizer_net2.step()
-            optimizer_net2.zero_grad()
+            # optimizer_net2.zero_grad()
             ##
             loss_cls3 = criterion(net3(inputs), labels)
             loss_cls3.backward()
             optimizer_net3.step()
-            optimizer_net3.zero_grad()
+            # optimizer_net3.zero_grad()
 
             encoded = model_en(inputs)
             decoded = model_de(encoded)
             # decoded_clamp = clamp_with_grad(decoded)
-            recovered = model_rec(decoded)
+            recovered = model_rec(decoded, encoded)
             # recovered_clamp = clamp_with_grad(recovered)
+
+            ####### ENEMY #########
+            if True: #epoch >= 3:
+                enemy_recovered = model_enemy(decoded.detach())
+                loss_l1_enemy = l1_loss(enemy_recovered, inputs)
+
+                loss_enemy = loss_l1_enemy
+                if epoch >= 3:
+                    loss_cls_enemy = criterion(net1(enemy_recovered), labels) + \
+                                     criterion(net2(enemy_recovered), labels) + \
+                                     criterion(net3(enemy_recovered), labels)
+                    loss_cls_enemy /= 3
+                    loss_enemy += cls_weight*loss_cls_enemy
+                    running_cls_enemy += loss_cls_enemy.item()
+
+                loss_enemy.backward()
+                optimizer_enemy.step()
+                # optimizer_enemy.zero_grad()
+
+                psnr_enemy = psnr(postprocess(enemy_recovered), postprocess(inputs)).item()
+                running_psnr_enemy += psnr_enemy
+
+                ####### enemy step ########
+                enemy_recovered = model_enemy(decoded)
+                loss_cls_enemy = criterion(net1(enemy_recovered), labels) + \
+                                 criterion(net2(enemy_recovered), labels) + \
+                                 criterion(net3(enemy_recovered), labels)
+                loss_cls_enemy /= 3
+            #######################
 
             # gan_real = model_dis(inputs)
             # gan_fake = model_dis(recovered.detach())
@@ -179,6 +216,7 @@ for epoch in range(50):  # loop over the dataset multiple times
             loss = loss_coarse+loss_recover
             # loss += loss_g*0.01+loss_g1*0.01
             if epoch>=3 and psnr_forward>=psnr_thresh:
+                loss += -cls_weight*loss_cls_enemy
                 loss += -cls_weight*loss_cls_wrong+1*cls_weight*loss_cls_right
             loss.backward()
             optimizer_en.step()
@@ -197,7 +235,7 @@ for epoch in range(50):  # loop over the dataset multiple times
             running_cls_wrong += loss_cls_wrong.item()
 
             if i % print_step == print_step-1:    # print every 2000 mini-batches
-                print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / print_step:.5f} '
+                print(f'[{epoch + 1}, {i + 1}, {compression_rate}] loss: {running_loss / print_step:.5f} '
                       f'gan: {running_gan / print_step:.5f} '
                       f'recover: {running_recover / print_step:.5f} '
                       f'vgg: {running_cls1 / print_step:.5f} '
@@ -205,10 +243,14 @@ for epoch in range(50):  # loop over the dataset multiple times
                       f'goo: {running_cls3 / print_step:.5f} '
                       f'coarse: {running_coarse / print_step:.5f} '
                       f'cls_wrong: {running_cls_wrong / print_step:.5f} '
-                      f'cls_right: {running_cls_right / print_step:.5f} ')
+                      f'cls_right: {running_cls_right / print_step:.5f} '
+                      f'enemy_psnr: {running_psnr_enemy / print_step:.5f} '
+                      f'enemy_cls: {running_cls_enemy / print_step:.5f} '
+                      )
                 running_loss, running_gan, running_coarse, running_recover = 0.0, 0.0, 0.0, 0.0
                 running_cls1, running_cls2, running_cls3 = 0.0, 0.0, 0.0
                 running_cls_wrong, running_cls_right = 0.0, 0.0
+                running_psnr_enemy, running_cls_enemy = 0.0, 0.0
             if i % save_step == save_step-1:
                 images = stitch_images(
                     postprocess(inputs),
@@ -236,15 +278,19 @@ for epoch in range(50):  # loop over the dataset multiple times
             torch.save(model_de.state_dict(), PATH)
             PATH = f'./model_dis_{str(int(compression_rate))}.pth'
             torch.save(model_dis.state_dict(), PATH)
-            ATH = f'./model_rec_{str(int(compression_rate))}.pth'
+            PATH = f'./model_rec_{str(int(compression_rate))}.pth'
             torch.save(model_rec.state_dict(), PATH)
+            PATH = f'./model_enemy_{str(int(compression_rate))}.pth'
+            torch.save(model_enemy.state_dict(), PATH)
 
     ## eval
     print(f'-------------- Start Evaluating Epoch {epoch} ------------------')
     running_loss, running_gan, running_coarse, running_recover = 0.0, 0.0, 0.0, 0.0
     running_cls1, running_cls2, running_cls3 = 0.0, 0.0, 0.0
     running_cls_wrong, running_cls_right = 0.0, 0.0
+    running_psnr_enemy, running_cls_enemy = 0.0, 0.0
     with torch.no_grad():
+        model_enemy.eval()
         model_dis.eval()
         model_de.eval()
         model_rec.eval()
@@ -261,7 +307,8 @@ for epoch in range(50):  # loop over the dataset multiple times
             encoded = quantization(encoded)
             decoded = model_de(encoded)
             # decoded_clamp = clamp_with_grad(decoded)
-            recovered = model_rec(decoded)
+            recovered = model_rec(decoded, encoded)
+            enemy_recovered = model_enemy(decoded)
             # recovered_clamp = clamp_with_grad(recovered)
 
             psnr_forward = psnr(postprocess(decoded), postprocess(inputs)).item()
@@ -284,10 +331,20 @@ for epoch in range(50):  # loop over the dataset multiple times
             running_cls_right += (labels == argmax.squeeze()).float().mean()
             _, argmax = torch.max(net3(recovered), 1)
             running_cls_right += (labels == argmax.squeeze()).float().mean()
+            _, argmax = torch.max(net1(enemy_recovered), 1)
+            if epoch>=3:
+                psnr_enemy = psnr(postprocess(enemy_recovered), postprocess(inputs)).item()
+                running_psnr_enemy += psnr_enemy
+                running_cls_enemy += (labels == argmax.squeeze()).float().mean()
+                _, argmax = torch.max(net2(enemy_recovered), 1)
+                running_cls_enemy += (labels == argmax.squeeze()).float().mean()
+                _, argmax = torch.max(net3(enemy_recovered), 1)
+                running_cls_enemy += (labels == argmax.squeeze()).float().mean()
 
             running_coarse += psnr_forward
             running_recover += psnr_backward
 
+        running_cls_enemy /= 3
         running_cls_right /= 3
         running_cls_wrong /= 3
         print(f'[{epoch + 1}, {i + 1:5d}] '
