@@ -1,1 +1,1 @@
-CUDA_VISIBLE_DEVICES=1 python ./train_compress.py
+CUDA_VISIBLE_DEVICES=0 python ./train_compress.py -compression_rate 0.4

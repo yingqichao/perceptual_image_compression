@@ -9,6 +9,14 @@ from models.loss import CWLoss
 from models.class_models.vgg import VGG
 from models.class_models.resnet import ResNet18
 from models.class_models.googlenet import GoogLeNet
+from utils import stitch_images
+import torch.optim as optim
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument('-checkpoint', type=int, default=0.0, help='')
+parser.add_argument('-compression_rate', type=float, default=0.4, help='')
+args = parser.parse_args()
 
 transform = transforms.Compose(
     [transforms.ToTensor(),
@@ -29,10 +37,10 @@ testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
 classes = ('plane', 'car', 'bird', 'cat',
            'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
-scale = 0.5
-print(f"scale is {scale}")
-model_en = MIMOUNet_encoder(scale=scale).cuda()
-model_de = MIMOUNet_decoder(scale=scale).cuda()
+compression_rate = args.compression_rate
+print(f"scale is {compression_rate}")
+model_en = MIMOUNet_encoder(compression_rate=compression_rate).cuda()
+model_de = MIMOUNet_decoder(compression_rate=compression_rate).cuda()
 model_rec = MIMOUNet().cuda()
 # net = Simple_Class_Net().cuda()
 model_dis = SimplePatchGAN().cuda()
@@ -42,16 +50,24 @@ net2 = ResNet18().cuda()
 net3 = GoogLeNet().cuda()
 # net = DenseNet121()
 
+if args.checkpoint!=0:
+    PATH = f'./vgg_{str(compression_rate * 10)}.pth'
+    net1.load_state_dict(torch.load(PATH))
+    PATH = f'./res_{str(compression_rate * 10)}.pth'
+    net2.load_state_dict(torch.load(PATH))
+    PATH = f'./google_{str(compression_rate * 10)}.pth'
+    net3.load_state_dict(torch.load(PATH))
+    PATH = f'./model_en_{str(compression_rate * 10)}.pth'
+    model_en.load_state_dict(torch.load(PATH))
+    PATH = f'./model_de_{str(compression_rate * 10)}.pth'
+    model_de.load_state_dict(torch.load(PATH))
+    PATH = f'./model_dis_{str(compression_rate * 10)}.pth'
+    model_dis.load_state_dict(torch.load(PATH))
+    PATH = f'./model_rec_{str(compression_rate * 10)}.pth'
+    model_rec.load_state_dict(torch.load(PATH))
+
 cw_loss = CWLoss(num_classes=10).cuda()
-# input = torch.ones((1,3,64,64)).cuda()
-# output = model(input)
-# output_de = model_de(output)
-# print(output.shape)
-# print(output_de.shape)
 psnr = PSNR(255.0).cuda()
-
-import torch.optim as optim
-
 criterion = nn.CrossEntropyLoss().cuda()
 l1_loss = nn.SmoothL1Loss().cuda()
 bce_with_logits_loss = nn.BCEWithLogitsLoss().cuda()
@@ -165,7 +181,7 @@ with torch.enable_grad():
             running_cls_right += loss_cls_right.item()
             running_cls_wrong += loss_cls_wrong.item()
 
-            print_step = 50
+            print_step, save_step = 50, 1000
             if i % print_step == print_step-1:    # print every 2000 mini-batches
                 print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / print_step:.5f} '
                       f'gan: {running_gan / print_step:.5f} '
@@ -179,22 +195,31 @@ with torch.enable_grad():
                 running_loss, running_gan, running_coarse, running_recover = 0.0, 0.0, 0.0, 0.0
                 running_cls1, running_cls2, running_cls3 = 0.0, 0.0, 0.0
                 running_cls_wrong, running_cls_right = 0.0, 0.0
+            if i % save_step == save_step-1:
+                images = stitch_images(
+                    postprocess(inputs),
+                    postprocess(decoded),
+                    postprocess(recovered),
+                    img_per_row=1
+                )
 
         if epoch%10==9:
             print(f'saving model at epoch {epoch}')
 
-            PATH = f'./vgg_{str(scale*10)}.pth'
+            PATH = f'./vgg_{str(compression_rate*10)}.pth'
             torch.save(net1.state_dict(), PATH)
-            PATH = f'./res_{str(scale*10)}.pth'
+            PATH = f'./res_{str(compression_rate*10)}.pth'
             torch.save(net2.state_dict(), PATH)
-            PATH = f'./google_{str(scale*10)}.pth'
+            PATH = f'./google_{str(compression_rate*10)}.pth'
             torch.save(net3.state_dict(), PATH)
-            PATH = f'./model_en_{str(scale*10)}.pth'
+            PATH = f'./model_en_{str(compression_rate*10)}.pth'
             torch.save(model_en.state_dict(), PATH)
-            PATH = f'./model_de_{str(scale*10)}.pth'
+            PATH = f'./model_de_{str(compression_rate*10)}.pth'
             torch.save(model_de.state_dict(), PATH)
-            PATH = f'./model_dis_{str(scale*10)}.pth'
+            PATH = f'./model_dis_{str(compression_rate*10)}.pth'
             torch.save(model_dis.state_dict(), PATH)
+            ATH = f'./model_rec_{str(compression_rate * 10)}.pth'
+            torch.save(model_rec.state_dict(), PATH)
 
 # dataiter = iter(testloader)
 # images, labels = dataiter.next()

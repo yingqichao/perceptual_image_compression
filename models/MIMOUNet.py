@@ -197,12 +197,20 @@ class MIMOUNet(nn.Module):
         return z
 
 class MIMOUNet_encoder(nn.Module):
-    def __init__(self, num_res=8, scale=1.0):
+    def __init__(self, num_res=8, scale=1.0, compression_rate=0.5):
         super(MIMOUNet_encoder, self).__init__()
         self.scale = scale
+        self.compression_rate = compression_rate
         base_channel = 32
 
-        print(f"Current s: {scale*scale*(0.25*0.25+0.5*0.5+1)/3}")
+        original_scale = scale*scale*(0.25*0.25+0.5*0.5+1)/3
+        further_scaling = compression_rate/original_scale
+        print(f"Current s: {compression_rate}")
+        print(f"further scaling factor:{further_scaling}")
+
+        self.MLP1 = nn.Linear(int(32*32*scale*scale),int(32*32*scale*scale*further_scaling))
+        self.MLP2 = nn.Linear(int(16 * 16 * scale * scale), int(16 * 16 * scale * scale * further_scaling))
+        self.MLP3 = nn.Linear(int(8 * 8 * scale * scale), int(8 * 8 * scale * scale * further_scaling))
         self.Encoder = nn.ModuleList([
             EBlock(base_channel, num_res),
             EBlock(base_channel*2, num_res),
@@ -276,20 +284,33 @@ class MIMOUNet_encoder(nn.Module):
         res2 = F.interpolate(res2, scale_factor=1 * self.scale) if 1 * self.scale != 1 else res2
         z = F.interpolate(z, scale_factor=1 * self.scale) if 1 * self.scale != 1 else z
 
-        res2 = self.AFFs[1](z12, res2, z42).view(batchsize,-1)
-        res1 = self.AFFs[0](res1, z21, z41).view(batchsize,-1)
-        z = self.conv1x1(z).view(batchsize,-1)
+        res1 = self.MLP1(self.AFFs[0](res1, z21, z41).view(batchsize, -1))
+        res2 = self.MLP2(self.AFFs[1](z12, res2, z42).view(batchsize,-1))
+        z = self.MLP3(self.conv1x1(z).view(batchsize,-1))
 
         outputs = torch.concat((res1,res2,z),dim=1)
 
         return outputs
 
 class MIMOUNet_decoder(nn.Module):
-    def __init__(self, num_res=8,scale=1.0):
+    def __init__(self, num_res=8,scale=1.0,compression_rate=0.5):
         super(MIMOUNet_decoder, self).__init__()
-        self.scale = int(1/scale)
+        self.compression_rate = compression_rate
         base_channel = 32
 
+        original_scale = scale * scale * (0.25 * 0.25 + 0.5 * 0.5 + 1) / 3
+        further_scaling = compression_rate / original_scale
+        print(f"Current s: {compression_rate}")
+        print(f"further scaling factor:{further_scaling}")
+        self.index1 = int(32 * 32 * scale * scale * further_scaling)
+        self.index2 = int(16 * 16 * scale * scale * further_scaling)
+        self.index3 = int(8 * 8 * scale * scale * further_scaling)
+
+        self.MLP1 = nn.Linear(self.index1,int(32*32*scale*scale))
+        self.MLP2 = nn.Linear(self.index2,int(16*16*scale*scale))
+        self.MLP3 = nn.Linear(self.index3,int(8*8*scale*scale))
+
+        self.scale = int(1 / scale)
         self.Encoder = nn.ModuleList([
             EBlock(base_channel, num_res),
             EBlock(base_channel*2, num_res),
@@ -338,13 +359,10 @@ class MIMOUNet_decoder(nn.Module):
         self.SCM2 = SCM(base_channel * 2)
 
     def forward(self, input_tensor):
-        batchsize, total_len = input_tensor.shape
-        size_res1 = int(total_len/21*16)
-        res1 = input_tensor[:,:size_res1].view(-1, 1, int(size_res1**0.5),int(size_res1**0.5))
-        size_res2 = int(total_len / 21 * 4)
-        res2 = input_tensor[:, size_res1:size_res1+size_res2].view(-1, 1, int(size_res2 ** 0.5), int(size_res2 ** 0.5))
-        size_res3 = int(total_len / 21 * 1)
-        z = input_tensor[:, size_res1+size_res2:].view(-1, 1, int(size_res3 ** 0.5), int(size_res3 ** 0.5))
+        batchsize, _ = input_tensor.shape
+        res1 = self.MLP1(input_tensor[:,:self.index1]).view(-1, 1, int(32/self.scale),int(32/self.scale))
+        res2 = self.MLP2(input_tensor[:, self.index1:self.index1+self.index2]).view(-1, 1, int(16/self.scale), int(16/self.scale))
+        z = self.MLP3(input_tensor[:, self.index1+self.index2:]).view(-1, 1, int(8/self.scale), int(8/self.scale))
 
         res1 = self.conv1x1_4(res1)
         res2 = self.conv1x1_2(res2)
