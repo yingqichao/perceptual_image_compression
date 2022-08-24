@@ -18,8 +18,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-checkpoint', type=int, default=0.0, help='')
 parser.add_argument('-compression_rate', type=float, default=32, help='')
 parser.add_argument('-cls_weight', type=float, default=0.005, help='')
-parser.add_argument('-thresh', type=int, default=28, help='')
+parser.add_argument('-thresh', type=float, default=28.0, help='')
 parser.add_argument('-batch', type=int, default=64, help='')
+parser.add_argument('-epoch_thresh', type=int, default=3, help='')
 args = parser.parse_args()
 print(args)
 
@@ -79,6 +80,7 @@ if args.checkpoint!=0:
     model_rec.load_state_dict(torch.load(PATH))
     PATH = f'./model_enemy_{str(int(compression_rate))}.pth'
     model_enemy.load_state_dict(torch.load(PATH))
+    print("Models loaded.")
 
 cw_loss = CWLoss(num_classes=10).cuda()
 psnr = PSNR(255.0).cuda()
@@ -134,17 +136,13 @@ for epoch in range(50):  # loop over the dataset multiple times
             loss_cls1 = criterion(net1(inputs), labels)
             loss_cls1.backward()
             optimizer_net1.step()
-            # optimizer_net1.zero_grad()
-            ##
             loss_cls2 = criterion(net2(inputs), labels)
             loss_cls2.backward()
             optimizer_net2.step()
-            # optimizer_net2.zero_grad()
-            ##
             loss_cls3 = criterion(net3(inputs), labels)
             loss_cls3.backward()
             optimizer_net3.step()
-            # optimizer_net3.zero_grad()
+
 
             encoded = model_en(inputs)
             decoded = model_de(encoded)
@@ -153,12 +151,12 @@ for epoch in range(50):  # loop over the dataset multiple times
             # recovered_clamp = clamp_with_grad(recovered)
 
             ####### ENEMY #########
-            if True: #epoch >= 3:
+            if True: #epoch>=args.epoch_thresh:
                 enemy_recovered = model_enemy(decoded.detach())
                 loss_l1_enemy = l1_loss(enemy_recovered, inputs)
 
                 loss_enemy = loss_l1_enemy
-                if epoch >= 3:
+                if epoch>=args.epoch_thresh:
                     loss_cls_enemy = criterion(net1(enemy_recovered), labels) + \
                                      criterion(net2(enemy_recovered), labels) + \
                                      criterion(net3(enemy_recovered), labels)
@@ -173,12 +171,6 @@ for epoch in range(50):  # loop over the dataset multiple times
                 psnr_enemy = psnr(postprocess(enemy_recovered), postprocess(inputs)).item()
                 running_psnr_enemy += psnr_enemy
 
-                ####### enemy step ########
-                enemy_recovered = model_enemy(decoded)
-                loss_cls_enemy = criterion(net1(enemy_recovered), labels) + \
-                                 criterion(net2(enemy_recovered), labels) + \
-                                 criterion(net3(enemy_recovered), labels)
-                loss_cls_enemy /= 3
             #######################
 
             # gan_real = model_dis(inputs)
@@ -215,9 +207,16 @@ for epoch in range(50):  # loop over the dataset multiple times
 
             loss = loss_coarse+loss_recover
             # loss += loss_g*0.01+loss_g1*0.01
-            if epoch>=3 and psnr_forward>=psnr_thresh:
-                loss += -cls_weight*loss_cls_enemy
-                loss += -cls_weight*loss_cls_wrong+1*cls_weight*loss_cls_right
+            if epoch>=args.epoch_thresh and psnr_forward>=psnr_thresh:
+                ####### enemy step ########
+                enemy_recovered = model_enemy(decoded)
+                loss_cls_enemy1 = criterion(net1(enemy_recovered), labels) + \
+                                 criterion(net2(enemy_recovered), labels) + \
+                                 criterion(net3(enemy_recovered), labels)
+                loss_cls_enemy1 /= 3
+
+                loss += -cls_weight*loss_cls_enemy1
+                loss += -cls_weight*loss_cls_wrong #+1*cls_weight*loss_cls_right
             loss.backward()
             optimizer_en.step()
             optimizer_dis.step()
@@ -332,7 +331,7 @@ for epoch in range(50):  # loop over the dataset multiple times
             _, argmax = torch.max(net3(recovered), 1)
             running_cls_right += (labels == argmax.squeeze()).float().mean()
             _, argmax = torch.max(net1(enemy_recovered), 1)
-            if epoch>=3:
+            if epoch>=args.epoch_thresh:
                 psnr_enemy = psnr(postprocess(enemy_recovered), postprocess(inputs)).item()
                 running_psnr_enemy += psnr_enemy
                 running_cls_enemy += (labels == argmax.squeeze()).float().mean()
@@ -354,7 +353,9 @@ for epoch in range(50):  # loop over the dataset multiple times
               f'goo: {running_cls3 / sum_batches:.5f} '
               f'coarse: {running_coarse / sum_batches:.5f} '
               f'cls_wrong: {running_cls_wrong / sum_batches:.5f} '
-              f'cls_right: {running_cls_right / sum_batches:.5f} ')
+              f'cls_right: {running_cls_right / sum_batches:.5f} '
+              f'cls_enemy: {running_cls_enemy / sum_batches:.5f} '
+              )
 
 # dataiter = iter(testloader)
 # images, labels = dataiter.next()
