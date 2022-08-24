@@ -194,7 +194,7 @@ class MIMOUNet(nn.Module):
         z = self.feat_extract[5](z)
         # outputs.append(z+x)
 
-        return z
+        return x+torch.tanh(z)
 
 class MIMOUNet_encoder(nn.Module):
     def __init__(self, num_res=8, scale=32, compression_rate=1.0):
@@ -399,9 +399,9 @@ class MIMOUNet_decoder(nn.Module):
         res2 = self.conv1x1_2(res2)
         z = self.conv1x1_1(z)
         if self.scale != 1:
-            res1 = F.interpolate(res1, scale_factor=self.scale)
-            res2 = F.interpolate(res2, scale_factor=self.scale)
-            z = F.interpolate(z, scale_factor=self.scale)
+            res1 = F.interpolate(res1, size=(32,32))
+            res2 = F.interpolate(res2, size=(16,16))
+            z = F.interpolate(z, size=(8,8))
 
         z = self.Decoder[0](z)
         z = self.feat_extract[3](z)
@@ -416,7 +416,7 @@ class MIMOUNet_decoder(nn.Module):
         z = self.Decoder[2](z)
         outputs = self.feat_extract[5](z)
 
-        return outputs
+        return torch.tanh(outputs)
 
 
 class Simple_Class_Net(nn.Module):

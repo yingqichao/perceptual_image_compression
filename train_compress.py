@@ -25,14 +25,14 @@ transform = transforms.Compose(
     [transforms.ToTensor(),
      transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-batch_size = 64
-print("using CIFAR100")
-trainset = torchvision.datasets.CIFAR100(root='./data', train=True,
+batch_size = 16
+print("using CIFAR10")
+trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
                                         download=True, transform=transform)
 trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
                                           shuffle=True, num_workers=2)
 
-testset = torchvision.datasets.CIFAR100(root='./data', train=False,
+testset = torchvision.datasets.CIFAR10(root='./data', train=False,
                                        download=True, transform=transform)
 testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
                                          shuffle=False, num_workers=2)
@@ -52,10 +52,10 @@ model_de = MIMOUNet_decoder(scale=compression_rate).cuda()
 model_rec = MIMOUNet().cuda()
 # net = Simple_Class_Net().cuda()
 model_dis = SimplePatchGAN().cuda()
-net1 = VGG('VGG19', num_classes=100).cuda()
-net2 = ResNet18(num_classes=100).cuda()
+net1 = VGG('VGG19', num_classes=10).cuda()
+net2 = ResNet18(num_classes=10).cuda()
 # net = PreActResNet18()
-net3 = GoogLeNet(num_classes=100).cuda()
+net3 = GoogLeNet(num_classes=10).cuda()
 # net = DenseNet121()
 
 if args.checkpoint!=0:
@@ -74,17 +74,17 @@ if args.checkpoint!=0:
     PATH = f'./model_rec_{str(compression_rate * 10)}.pth'
     model_rec.load_state_dict(torch.load(PATH))
 
-cw_loss = CWLoss(num_classes=100).cuda()
+cw_loss = CWLoss(num_classes=10).cuda()
 psnr = PSNR(255.0).cuda()
 criterion = nn.CrossEntropyLoss().cuda()
 l1_loss = nn.SmoothL1Loss().cuda()
 bce_with_logits_loss = nn.BCEWithLogitsLoss().cuda()
 optimizer_dis = optim.AdamW(model_dis.parameters(),
-                                 lr=2e-4,betas=(0.9, 0.999), weight_decay=0.01)
+                                 lr=1e-4,betas=(0.9, 0.999), weight_decay=0.01)
 optimizer_en = optim.AdamW(model_en.parameters(),
-                                 lr=2e-4,betas=(0.9, 0.999), weight_decay=0.01)
+                                 lr=1e-4,betas=(0.9, 0.999), weight_decay=0.01)
 optimizer_de = optim.AdamW(model_de.parameters(),
-                                 lr=2e-4,betas=(0.9, 0.999), weight_decay=0.01)
+                                 lr=1e-4,betas=(0.9, 0.999), weight_decay=0.01)
 optimizer_net1 = optim.AdamW(net1.parameters(),
                                  lr=1e-3,betas=(0.9, 0.999), weight_decay=0.01)
 optimizer_net2 = optim.AdamW(net2.parameters(),
@@ -92,9 +92,9 @@ optimizer_net2 = optim.AdamW(net2.parameters(),
 optimizer_net3 = optim.AdamW(net3.parameters(),
                                  lr=1e-3,betas=(0.9, 0.999), weight_decay=0.01)
 optimizer_rec = optim.AdamW(model_rec.parameters(),
-                                 lr=2e-4,betas=(0.9, 0.999), weight_decay=0.01)
+                                 lr=1e-4,betas=(0.9, 0.999), weight_decay=0.01)
 
-for epoch in range(100):  # loop over the dataset multiple times
+for epoch in range(50):  # loop over the dataset multiple times
     with torch.enable_grad():
         model_dis.train()
         model_de.train()
@@ -137,9 +137,9 @@ for epoch in range(100):  # loop over the dataset multiple times
 
             encoded = model_en(inputs)
             decoded = model_de(encoded)
-            decoded_clamp = clamp_with_grad(decoded)
+            # decoded_clamp = clamp_with_grad(decoded)
             recovered = model_rec(decoded)
-            recovered_clamp = clamp_with_grad(recovered)
+            # recovered_clamp = clamp_with_grad(recovered)
 
             gan_real = model_dis(inputs)
             gan_fake = model_dis(recovered.detach())
@@ -152,8 +152,8 @@ for epoch in range(100):  # loop over the dataset multiple times
             optimizer_dis.step()
             optimizer_dis.zero_grad()
 
-            psnr_forward = psnr(postprocess(decoded_clamp), postprocess(inputs)).item()
-            psnr_backward = psnr(postprocess(recovered_clamp), postprocess(inputs)).item()
+            psnr_forward = psnr(postprocess(decoded), postprocess(inputs)).item()
+            psnr_backward = psnr(postprocess(recovered), postprocess(inputs)).item()
 
             loss_cls_wrong = criterion(net1(decoded),labels) + \
                              criterion(net2(decoded),labels) + \
@@ -255,12 +255,12 @@ for epoch in range(100):  # loop over the dataset multiple times
 
             encoded = model_en(inputs)
             decoded = model_de(encoded)
-            decoded_clamp = clamp_with_grad(decoded)
+            # decoded_clamp = clamp_with_grad(decoded)
             recovered = model_rec(decoded)
-            recovered_clamp = clamp_with_grad(recovered)
+            # recovered_clamp = clamp_with_grad(recovered)
 
-            psnr_forward = psnr(postprocess(decoded_clamp), postprocess(inputs)).item()
-            psnr_backward = psnr(postprocess(recovered_clamp), postprocess(inputs)).item()
+            psnr_forward = psnr(postprocess(decoded), postprocess(inputs)).item()
+            psnr_backward = psnr(postprocess(recovered), postprocess(inputs)).item()
             _, argmax = torch.max(net1(inputs), 1)
             running_cls1 += (labels == argmax.squeeze()).float().mean()
             _, argmax = torch.max(net2(inputs), 1)
