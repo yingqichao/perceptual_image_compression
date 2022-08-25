@@ -223,7 +223,7 @@ class MIMOUNetv2_encoder(nn.Module):
         self.compression_rate = compression_rate
         base_channel = 32
 
-        s = self.scale*self.scale*(0.25*0.25+0.5*0.5+1)/3
+        s = 2*self.scale*self.scale*(0.25*0.25+0.5*0.5+1)/3
         # further_scaling = compression_rate/original_scale
         print(f"Current s: {s}")
         # print(f"further scaling factor:{further_scaling}")
@@ -259,17 +259,17 @@ class MIMOUNetv2_encoder(nn.Module):
 
         self.AFF1_with_SE = nn.Sequential(
             BasicConv(base_channel * 7, base_channel, kernel_size=3, stride=1, relu=True),
-            BasicConv(base_channel, 1, kernel_size=1, stride=1, relu=False, norm=False)
+            BasicConv(base_channel, 2, kernel_size=1, stride=1, relu=False, norm=False)
         )
 
         self.AFF2_with_SE = nn.Sequential(
             BasicConv(base_channel * 7, base_channel, kernel_size=3, stride=1, relu=True),
-            BasicConv(base_channel, 1, kernel_size=1, stride=1, relu=False, norm=False)
+            BasicConv(base_channel, 2, kernel_size=1, stride=1, relu=False, norm=False)
         )
 
         self.AFF3_with_SE = nn.Sequential(
             BasicConv(base_channel * 7, base_channel, kernel_size=3, stride=1, relu=True),
-            BasicConv(base_channel, 1, kernel_size=1, stride=1, relu=False, norm=False)
+            BasicConv(base_channel, 2, kernel_size=1, stride=1, relu=False, norm=False)
         )
 
         # self.conv1x1 = BasicConv(base_channel*4, 1, kernel_size=1, stride=1, relu=False, norm=False)
@@ -343,7 +343,7 @@ class MIMOUNetv2_decoder(nn.Module):
         base_channel = 32
         self.scale = scale/original_scale
 
-        s = self.scale * self.scale * (0.25 * 0.25 + 0.5 * 0.5 + 1) / 3
+        s = 2*self.scale * self.scale * (0.25 * 0.25 + 0.5 * 0.5 + 1) / 3
         # further_scaling = compression_rate / original_scale
         print(f"Current s: {s}")
         # print(f"further scaling factor:{further_scaling}")
@@ -409,9 +409,9 @@ class MIMOUNetv2_decoder(nn.Module):
         batchsize, _ = input_tensor.shape
         # policy = self.policy_network(input_tensor)
         res1 = self.scramble1(input_tensor[:,:self.index1]).view(-1, 1, int(self.original_scale/self.scale),int(self.original_scale/self.scale))
-        res2 = self.scramble2(input_tensor[:, self.index1:self.index1+self.index2]).view(-1, 1, int(self.original_scale/2/self.scale), int(self.original_scale/2/self.scale))
+        res2 = self.scramble2(input_tensor[:, 2*self.index1:2*self.index1+self.index2]).view(-1, 1, int(self.original_scale/2/self.scale), int(self.original_scale/2/self.scale))
         ## randomly generate z for adversarial generation
-        z = self.scramble3(input_tensor[:, self.index1+self.index2:]).view(-1, 1, int(self.original_scale/4/self.scale), int(self.original_scale/4/self.scale))
+        z = self.scramble3(input_tensor[:, 2*(self.index1+self.index2):2*(self.index1+self.index2)+self.index3]).view(-1, 1, int(self.original_scale/4/self.scale), int(self.original_scale/4/self.scale))
 
         res1 = self.conv1x1_4(res1)
         res2 = self.conv1x1_2(res2)
@@ -446,7 +446,7 @@ class MIMOUNetv2(nn.Module):
         base_channel = 32
         self.scale = scale / original_scale
 
-        s = self.scale * self.scale * (0.25 * 0.25 + 0.5 * 0.5 + 1) / 3
+        s = 2*self.scale * self.scale * (0.25 * 0.25 + 0.5 * 0.5 + 1) / 3
         # further_scaling = compression_rate / original_scale
         print(f"Current s: {s}")
         # print(f"further scaling factor:{further_scaling}")
@@ -561,11 +561,11 @@ class MIMOUNetv2(nn.Module):
 
         ###### auxiliary information from the input_tensor
         if not self.is_enemy:
-            res1_aux = self.scramble1(input_tensor[:, :self.index1])\
+            res1_aux = self.scramble1(input_tensor[:, self.index1:2*self.index1])\
                 .view(-1, 1, int(self.original_scale / self.scale), int(self.original_scale / self.scale))
-            res2_aux = self.scramble2(input_tensor[:, self.index1:self.index1 + self.index2])\
+            res2_aux = self.scramble2(input_tensor[:, 2*self.index1+self.index2:2*(self.index1 + self.index2)])\
                 .view(-1, 1, int(self.original_scale/2 / self.scale),int(self.original_scale/2 / self.scale))
-            z_aux = self.scramble3(input_tensor[:, self.index1 + self.index2:])\
+            z_aux = self.scramble3(input_tensor[:, 2*(self.index1 + self.index2)+self.index3:])\
                 .view(-1, 1, int(self.original_scale/4 / self.scale), int(self.original_scale/4 / self.scale))
             #
             res1_aux = self.conv1x1_4(res1_aux)
