@@ -3,4 +3,5 @@ CUDA_VISIBLE_DEVICES=0 python ./train_compress.py -compression_rate 32 \
                                                   -thresh 29 \
                                                   -batch 64 \
                                                   -checkpoint 0 \
-                                                  -epoch_thresh 0
+                                                  -epoch_thresh 0 \
+                                                  -dataset CIFAR10

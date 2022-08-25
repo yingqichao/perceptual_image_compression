@@ -20,73 +20,138 @@ parser.add_argument('-cls_weight', type=float, default=0.005, help='')
 parser.add_argument('-thresh', type=float, default=28.0, help='')
 parser.add_argument('-batch', type=int, default=64, help='')
 parser.add_argument('-epoch_thresh', type=int, default=3, help='')
+parser.add_argument('-dataset', type=str, default='CIFAR10', help='')
 args = parser.parse_args()
 print(args)
 
-transform = transforms.Compose(
-    [transforms.ToTensor(),
-     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
 ########### Settings ################
 print_step, save_step = 50, 750
 num_epochs = 50
+dataset = args.dataset
 batch_size = args.batch
 psnr_thresh = args.thresh # 28
 cls_weight = args.cls_weight #0.005
 compression_rate = args.compression_rate
 print(f"scale is {compression_rate}")
 #####################################
-print("using CIFAR10")
-trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
-                                        download=True, transform=transform)
+print(f"using {args.dataset}")
+if "CIFAR10" in dataset:
+    transform = transforms.Compose(
+        [transforms.ToTensor(),
+         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
+                                            download=True, transform=transform)
+    testset = torchvision.datasets.CIFAR10(root='./data', train=False,
+                                           download=True, transform=transform)
+    num_classes = 10
+elif "CIFAR10" in dataset:
+    transform = transforms.Compose(
+        [transforms.ToTensor(),
+         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    trainset = torchvision.datasets.CIFAR100(root='./data', train=True,
+                                            download=True, transform=transform)
+    testset = torchvision.datasets.CIFAR100(root='./data', train=False,
+                                           download=True, transform=transform)
+    num_classes = 100
+elif "Caltech" in dataset:
+    transform = transforms.Compose(
+        [transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    trainset = torchvision.datasets.ImageFolder(
+        '/groupshare/Caltech-101/train',
+        transform,
+    )
+    testset = torchvision.datasets.ImageFolder(
+        '/groupshare/Caltech-101/test',
+        transform,
+    )
+    num_classes = 101
+elif "CelebA" in dataset:
+    transform = transforms.Compose(
+        [transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    trainset = torchvision.datasets.ImageFolder(
+        '/groupshare/CelebA-100/train',
+        transform,
+    )
+    testset = torchvision.datasets.ImageFolder(
+        '/groupshare/CelebA-100/test',
+        transform,
+    )
+    num_classes = 100
+elif "ImageNet" in dataset:
+    transform = transforms.Compose(
+        [transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    trainset = torchvision.datasets.ImageFolder(
+        '/groupshare/MiniImageNet/train',
+        transform,
+    )
+    testset = torchvision.datasets.ImageFolder(
+        '/groupshare/MiniImageNet/test',
+        transform,
+    )
+    num_classes = 1000
+else:
+    raise NotImplementedError("We only support CIFAR/MiniImageNet/Caltech/CelebA so far!!!")
+
+
 trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
                                           shuffle=True, num_workers=2)
 
-testset = torchvision.datasets.CIFAR10(root='./data', train=False,
-                                       download=True, transform=transform)
 testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
                                          shuffle=False, num_workers=2)
 
-classes = ('plane', 'car', 'bird', 'cat',
-           'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+# classes = ('plane', 'car', 'bird', 'cat',
+#            'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
+########### Models (Total:8) #################
 model_en = MIMOUNetv2_encoder(scale=compression_rate).cuda()
 model_de = MIMOUNetv2_decoder(scale=compression_rate).cuda()
 model_rec = MIMOUNetv2(scale=compression_rate,enemy=False).cuda()
 model_enemy = MIMOUNetv2(scale=compression_rate,enemy=True).cuda()
 # net = Simple_Class_Net().cuda()
 model_dis = SimplePatchGAN().cuda()
-net1 = VGG('VGG19', num_classes=10).cuda()
-net2 = ResNet18(num_classes=10).cuda()
+net1 = VGG('VGG19', num_classes=num_classes).cuda()
+net2 = ResNet18(num_classes=num_classes).cuda()
 # net = PreActResNet18()
-net3 = GoogLeNet(num_classes=10).cuda()
+net3 = GoogLeNet(num_classes=num_classes).cuda()
 # net = DenseNet121()
+
+########### Losses #################
 quantization = diff_round
-
-if args.checkpoint!=0:
-    PATH = f'./vgg_{str(int(compression_rate))}.pth'
-    net1.load_state_dict(torch.load(PATH))
-    PATH = f'./res_{str(int(compression_rate))}.pth'
-    net2.load_state_dict(torch.load(PATH))
-    PATH = f'./google_{str(int(compression_rate))}.pth'
-    net3.load_state_dict(torch.load(PATH))
-    PATH = f'./model_en_{str(int(compression_rate))}.pth'
-    model_en.load_state_dict(torch.load(PATH))
-    PATH = f'./model_de_{str(int(compression_rate))}.pth'
-    model_de.load_state_dict(torch.load(PATH))
-    PATH = f'./model_dis_{str(int(compression_rate))}.pth'
-    model_dis.load_state_dict(torch.load(PATH))
-    PATH = f'./model_rec_{str(int(compression_rate))}.pth'
-    model_rec.load_state_dict(torch.load(PATH))
-    PATH = f'./model_enemy_{str(int(compression_rate))}.pth'
-    model_enemy.load_state_dict(torch.load(PATH))
-    print("Models loaded.")
-
-cw_loss = CWLoss(num_classes=10).cuda()
+cw_loss = CWLoss(num_classes=num_classes).cuda()
 psnr = PSNR(255.0).cuda()
 criterion = nn.CrossEntropyLoss().cuda()
 l1_loss = nn.SmoothL1Loss().cuda()
 bce_with_logits_loss = nn.BCEWithLogitsLoss().cuda()
+
+
+########### Checkpoints and Optimizers #################
+
+if args.checkpoint!=0:
+    PATH = f'./vgg_{str(int(compression_rate))}_{dataset}.pth'
+    net1.load_state_dict(torch.load(PATH))
+    PATH = f'./res_{str(int(compression_rate))}_{dataset}.pth'
+    net2.load_state_dict(torch.load(PATH))
+    PATH = f'./google_{str(int(compression_rate))}_{dataset}.pth'
+    net3.load_state_dict(torch.load(PATH))
+    PATH = f'./model_en_{str(int(compression_rate))}_{dataset}.pth'
+    model_en.load_state_dict(torch.load(PATH))
+    PATH = f'./model_de_{str(int(compression_rate))}_{dataset}.pth'
+    model_de.load_state_dict(torch.load(PATH))
+    PATH = f'./model_dis_{str(int(compression_rate))}_{dataset}.pth'
+    model_dis.load_state_dict(torch.load(PATH))
+    PATH = f'./model_rec_{str(int(compression_rate))}_{dataset}.pth'
+    model_rec.load_state_dict(torch.load(PATH))
+    PATH = f'./model_enemy_{str(int(compression_rate))}_{dataset}.pth'
+    model_enemy.load_state_dict(torch.load(PATH))
+    print("Models loaded.")
+
 optimizer_dis = optim.AdamW(model_dis.parameters(),
                                  lr=2e-4)
 optimizer_en = optim.AdamW(model_en.parameters(),
@@ -104,7 +169,8 @@ optimizer_rec = optim.AdamW(model_rec.parameters(),
 optimizer_enemy = optim.AdamW(model_enemy.parameters(),
                                  lr=2e-4)
 
-for epoch in range(num_epochs):  # loop over the dataset multiple times
+########## train ###########################
+for epoch in range(num_epochs):
     with torch.enable_grad():
         model_enemy.train()
         model_dis.train()
@@ -250,6 +316,8 @@ for epoch in range(num_epochs):  # loop over the dataset multiple times
                 running_cls1, running_cls2, running_cls3 = 0.0, 0.0, 0.0
                 running_cls_wrong, running_cls_right = 0.0, 0.0
                 running_psnr_enemy, running_cls_enemy = 0.0, 0.0
+
+            ######## save images ################
             if i % save_step == save_step-1:
                 images = stitch_images(
                     postprocess(inputs),
@@ -258,31 +326,32 @@ for epoch in range(num_epochs):  # loop over the dataset multiple times
                     img_per_row=1
                 )
 
-                name = f'./img/{str(epoch)}_{str(int(compression_rate*10))}.png'
+                name = f'./img/{str(epoch)}_{str(int(compression_rate*10))}_{dataset}.png'
                 print('\nsaving sample ' + name)
                 images.save(name)
 
+        ########## save checkpoints #############
         if epoch%5==4:
             print(f'saving model at epoch {epoch}')
 
-            PATH = f'./vgg_{str(int(compression_rate))}.pth'
+            PATH = f'./vgg_{str(int(compression_rate))}_{dataset}.pth'
             torch.save(net1.state_dict(), PATH)
-            PATH = f'./res_{str(int(compression_rate))}.pth'
+            PATH = f'./res_{str(int(compression_rate))}_{dataset}.pth'
             torch.save(net2.state_dict(), PATH)
-            PATH = f'./google_{str(int(compression_rate))}.pth'
+            PATH = f'./google_{str(int(compression_rate))}_{dataset}.pth'
             torch.save(net3.state_dict(), PATH)
-            PATH = f'./model_en_{str(int(compression_rate))}.pth'
+            PATH = f'./model_en_{str(int(compression_rate))}_{dataset}.pth'
             torch.save(model_en.state_dict(), PATH)
-            PATH = f'./model_de_{str(int(compression_rate))}.pth'
+            PATH = f'./model_de_{str(int(compression_rate))}_{dataset}.pth'
             torch.save(model_de.state_dict(), PATH)
-            PATH = f'./model_dis_{str(int(compression_rate))}.pth'
+            PATH = f'./model_dis_{str(int(compression_rate))}_{dataset}.pth'
             torch.save(model_dis.state_dict(), PATH)
-            PATH = f'./model_rec_{str(int(compression_rate))}.pth'
+            PATH = f'./model_rec_{str(int(compression_rate))}_{dataset}.pth'
             torch.save(model_rec.state_dict(), PATH)
-            PATH = f'./model_enemy_{str(int(compression_rate))}.pth'
+            PATH = f'./model_enemy_{str(int(compression_rate))}_{dataset}.pth'
             torch.save(model_enemy.state_dict(), PATH)
 
-    ## eval
+    ############ eval ##############################
     print(f'-------------- Start Evaluating Epoch {epoch} ------------------')
     running_loss, running_gan, running_coarse, running_recover = 0.0, 0.0, 0.0, 0.0
     running_cls1, running_cls2, running_cls3 = 0.0, 0.0, 0.0
