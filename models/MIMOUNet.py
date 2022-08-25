@@ -214,18 +214,18 @@ class Simple_Class_Net(nn.Module):
 
 from models.SEAttention import SEAttention
 class MIMOUNetv2_encoder(nn.Module):
-    def __init__(self, num_res=8, scale=32, compression_rate=1.0):
+    def __init__(self, num_res=8, scale=32, original_scale=32, compression_rate=1.0):
         ### change logs
         print("Added AFF3")
 
         super(MIMOUNetv2_encoder, self).__init__()
-        self.scale = scale/32.0
+        self.scale = scale/original_scale
         self.compression_rate = compression_rate
         base_channel = 32
 
-        original_scale = self.scale*self.scale*(0.25*0.25+0.5*0.5+1)/3
+        s = self.scale*self.scale*(0.25*0.25+0.5*0.5+1)/3
         # further_scaling = compression_rate/original_scale
-        print(f"Current s: {original_scale}")
+        print(f"Current s: {s}")
         # print(f"further scaling factor:{further_scaling}")
 
         self.Encoder = nn.ModuleList([
@@ -321,34 +321,35 @@ class MIMOUNetv2_encoder(nn.Module):
         # res1 = self.AFFs[0](res1, z21, z41).view(batchsize, -1)
         # res2 = self.AFFs[1](z12, res2, z42).view(batchsize,-1)
         res1 = self.se_attention_AFF1(torch.cat((res1, z21, z41),dim=1))
-        res1 = self.AFF1_with_SE(res1)
-        res1 = self.scramble1(res1.view(batchsize, -1))
+        res1 = self.AFF1_with_SE(res1).view(batchsize, -1)
+        # res1 = self.scramble1(res1.view(batchsize, -1))
         res2 = self.se_attention_AFF2(torch.cat((z12, res2, z42), dim=1))
         res2 = self.AFF2_with_SE(res2).view(batchsize, -1)
-        res2 = self.scramble2(res2.view(batchsize, -1))
+        # res2 = self.scramble2(res2.view(batchsize, -1))
         # z = self.conv1x1(z).view(batchsize,-1)
         z = self.se_attention_AFF3(torch.cat((z, z24, z14), dim=1))
         z = self.AFF3_with_SE(z).view(batchsize, -1)
-        z = self.scramble3(z.view(batchsize, -1))
+        # z = self.scramble3(z.view(batchsize, -1))
 
         outputs = torch.concat((res1,res2,z),dim=1)
 
         return torch.tanh(outputs)
 
 class MIMOUNetv2_decoder(nn.Module):
-    def __init__(self, num_res=8,scale=32,compression_rate=0.5):
+    def __init__(self, num_res=8,scale=32, original_scale=32, compression_rate=0.5):
         super(MIMOUNetv2_decoder, self).__init__()
         self.compression_rate = compression_rate
+        self.original_scale = original_scale
         base_channel = 32
-        self.scale = scale/32
+        self.scale = scale/original_scale
 
-        original_scale = self.scale * self.scale * (0.25 * 0.25 + 0.5 * 0.5 + 1) / 3
+        s = self.scale * self.scale * (0.25 * 0.25 + 0.5 * 0.5 + 1) / 3
         # further_scaling = compression_rate / original_scale
-        print(f"Current s: {original_scale}")
+        print(f"Current s: {s}")
         # print(f"further scaling factor:{further_scaling}")
-        self.index1 = int(32 * 32 * self.scale * self.scale)
-        self.index2 = int(16 * 16 * self.scale * self.scale)
-        self.index3 = int(8 * 8 * self.scale * self.scale)
+        self.index1 = int(original_scale * original_scale * self.scale * self.scale)
+        self.index2 = int(original_scale * original_scale /2/2 * self.scale * self.scale)
+        self.index3 = int(original_scale * original_scale /4/4 * self.scale * self.scale)
 
         # self.policy_network = nn.Sequential(
         #     nn.Linear(self.index1+self.index2+self.index3,self.index1+self.index2+self.index3),
@@ -390,32 +391,35 @@ class MIMOUNetv2_decoder(nn.Module):
         self.FAM2 = FAM(base_channel * 2)
         self.SCM2 = SCM(base_channel * 2)
 
-        self.scramble1 = nn.Sequential(
-            nn.Linear(int(scale * scale), int(scale * scale))
-        )
-        self.scramble2 = nn.Sequential(
-            nn.Linear(int(scale / 2 * scale / 2), int(scale / 2 * scale / 2))
-        )
-        self.scramble3 = nn.Sequential(
-            nn.Linear(int(scale / 4 * scale / 4), int(scale / 4 * scale / 4))
-        )
+        self.scramble1 = nn.Identity()
+        # nn.Sequential(
+        #     nn.Linear(int(scale * scale), int(scale * scale))
+        # )
+        self.scramble2 = nn.Identity()
+        # nn.Sequential(
+        #     nn.Linear(int(scale / 2 * scale / 2), int(scale / 2 * scale / 2))
+        # )
+        self.scramble3 = nn.Identity()
+        # Sequential(
+        #     nn.Linear(int(scale / 4 * scale / 4), int(scale / 4 * scale / 4))
+        # )
 
 
     def forward(self, input_tensor):
         batchsize, _ = input_tensor.shape
         # policy = self.policy_network(input_tensor)
-        res1 = self.scramble1(input_tensor[:,:self.index1]).view(-1, 1, int(32/self.scale),int(32/self.scale))
-        res2 = self.scramble2(input_tensor[:, self.index1:self.index1+self.index2]).view(-1, 1, int(16/self.scale), int(16/self.scale))
+        res1 = self.scramble1(input_tensor[:,:self.index1]).view(-1, 1, int(self.original_scale/self.scale),int(self.original_scale/self.scale))
+        res2 = self.scramble2(input_tensor[:, self.index1:self.index1+self.index2]).view(-1, 1, int(self.original_scale/2/self.scale), int(self.original_scale/2/self.scale))
         ## randomly generate z for adversarial generation
-        z = self.scramble3(input_tensor[:, self.index1+self.index2:]).view(-1, 1, int(8/self.scale), int(8/self.scale))
+        z = self.scramble3(input_tensor[:, self.index1+self.index2:]).view(-1, 1, int(self.original_scale/4/self.scale), int(self.original_scale/4/self.scale))
 
         res1 = self.conv1x1_4(res1)
         res2 = self.conv1x1_2(res2)
         z = self.conv1x1_1(z)
         if self.scale != 1:
-            res1 = F.interpolate(res1, size=(32,32))
-            res2 = F.interpolate(res2, size=(16,16))
-            z = F.interpolate(z, size=(8,8))
+            res1 = F.interpolate(res1, size=(self.original_scale,self.original_scale))
+            res2 = F.interpolate(res2, size=(int(self.original_scale/2),int(self.original_scale/2)))
+            z = F.interpolate(z, size=(int(self.original_scale/4),int(self.original_scale/4)))
 
         z = self.Decoder[0](z)
         z = self.feat_extract[3](z)
@@ -434,20 +438,21 @@ class MIMOUNetv2_decoder(nn.Module):
 
 
 class MIMOUNetv2(nn.Module):
-    def __init__(self, num_res=8, scale=32, compression_rate=0.5, enemy=False):
+    def __init__(self, num_res=8, scale=32, original_scale=32, compression_rate=0.5, enemy=False):
         super(MIMOUNetv2, self).__init__()
+        self.original_scale = original_scale
         self.compression_rate = compression_rate
         self.is_enemy = enemy
         base_channel = 32
-        self.scale = scale / 32
+        self.scale = scale / original_scale
 
-        original_scale = self.scale * self.scale * (0.25 * 0.25 + 0.5 * 0.5 + 1) / 3
+        s = self.scale * self.scale * (0.25 * 0.25 + 0.5 * 0.5 + 1) / 3
         # further_scaling = compression_rate / original_scale
-        print(f"Current s: {original_scale}")
+        print(f"Current s: {s}")
         # print(f"further scaling factor:{further_scaling}")
-        self.index1 = int(32 * 32 * self.scale * self.scale)
-        self.index2 = int(16 * 16 * self.scale * self.scale)
-        self.index3 = int(8 * 8 * self.scale * self.scale)
+        self.index1 = int(original_scale * original_scale * self.scale * self.scale)
+        self.index2 = int(original_scale * original_scale /2/2 * self.scale * self.scale)
+        self.index3 = int(original_scale * original_scale /4/4 * self.scale * self.scale)
 
         # self.policy_network = nn.Sequential(
         #     nn.Linear(self.index1+self.index2+self.index3,self.index1+self.index2+self.index3),
@@ -515,15 +520,18 @@ class MIMOUNetv2(nn.Module):
         self.FAM2 = FAM(base_channel * 2)
         self.SCM2 = SCM(base_channel * 2)
 
-        self.scramble1 = nn.Sequential(
-            nn.Linear(int(scale * scale), int(scale * scale))
-        )
-        self.scramble2 = nn.Sequential(
-            nn.Linear(int(scale / 2 * scale / 2), int(scale / 2 * scale / 2))
-        )
-        self.scramble3 = nn.Sequential(
-            nn.Linear(int(scale / 4 * scale / 4), int(scale / 4 * scale / 4))
-        )
+        self.scramble1 = nn.Identity()
+        # nn.Sequential(
+        #     nn.Linear(int(scale * scale), int(scale * scale))
+        # )
+        self.scramble2 = nn.Identity()
+        # nn.Sequential(
+        #     nn.Linear(int(scale / 2 * scale / 2), int(scale / 2 * scale / 2))
+        # )
+        self.scramble3 = nn.Identity()
+        # Sequential(
+        #     nn.Linear(int(scale / 4 * scale / 4), int(scale / 4 * scale / 4))
+        # )
 
     def forward(self, x, input_tensor=None):
         batchsize, *_ = x.shape
@@ -553,17 +561,20 @@ class MIMOUNetv2(nn.Module):
 
         ###### auxiliary information from the input_tensor
         if not self.is_enemy:
-            res1_aux = self.scramble1(input_tensor[:, :self.index1]).view(-1, 1, int(32 / self.scale), int(32 / self.scale))
-            res2_aux = self.scramble2(input_tensor[:, self.index1:self.index1 + self.index2]).view(-1, 1, int(16 / self.scale),int(16 / self.scale))
-            z_aux = self.scramble3(input_tensor[:, self.index1 + self.index2:]).view(-1, 1, int(8 / self.scale), int(8 / self.scale))
+            res1_aux = self.scramble1(input_tensor[:, :self.index1])\
+                .view(-1, 1, int(self.original_scale / self.scale), int(self.original_scale / self.scale))
+            res2_aux = self.scramble2(input_tensor[:, self.index1:self.index1 + self.index2])\
+                .view(-1, 1, int(self.original_scale/2 / self.scale),int(self.original_scale/2 / self.scale))
+            z_aux = self.scramble3(input_tensor[:, self.index1 + self.index2:])\
+                .view(-1, 1, int(self.original_scale/4 / self.scale), int(self.original_scale/4 / self.scale))
             #
             res1_aux = self.conv1x1_4(res1_aux)
             res2_aux = self.conv1x1_2(res2_aux)
             z_aux = self.conv1x1_1(z_aux)
             if self.scale != 1:
-                res1_aux = F.interpolate(res1_aux, size=(32, 32))
-                res2_aux = F.interpolate(res2_aux, size=(16, 16))
-                z_aux = F.interpolate(z_aux, size=(8, 8))
+                res1_aux = F.interpolate(res1_aux, size=(self.original_scale, self.original_scale))
+                res2_aux = F.interpolate(res2_aux, size=(int(self.original_scale/2), int(self.original_scale/2)))
+                z_aux = F.interpolate(z_aux, size=(int(self.original_scale/4), int(self.original_scale/4)))
 
         # z = self.AFFs[2](z, z_aux)
         # res2 = self.AFFs[1](z12, res2, z42, res2_aux)

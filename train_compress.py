@@ -7,6 +7,7 @@ from metrics import PSNR, postprocess
 from models.loss import CWLoss
 from models.class_models.vgg import VGG
 from models.class_models.resnet import ResNet18
+from models.class_models.densenet import DenseNet121
 from models.class_models.googlenet import GoogLeNet
 from utils import stitch_images, clamp_with_grad
 import torch.optim as optim
@@ -21,11 +22,14 @@ parser.add_argument('-thresh', type=float, default=28.0, help='')
 parser.add_argument('-batch', type=int, default=64, help='')
 parser.add_argument('-epoch_thresh', type=int, default=3, help='')
 parser.add_argument('-dataset', type=str, default='CIFAR10', help='')
+parser.add_argument('-original_scale', type=int, default=32, help='')
+
 args = parser.parse_args()
 print(args)
 
 
 ########### Settings ################
+original_scale = args.original_scale
 print_step, save_step = 50, 750
 num_epochs = 50
 dataset = args.dataset
@@ -37,6 +41,7 @@ print(f"scale is {compression_rate}")
 #####################################
 print(f"using {args.dataset}")
 if "CIFAR10" in dataset:
+    original_scale = 32
     transform = transforms.Compose(
         [transforms.ToTensor(),
          transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
@@ -45,7 +50,8 @@ if "CIFAR10" in dataset:
     testset = torchvision.datasets.CIFAR10(root='./data', train=False,
                                            download=True, transform=transform)
     num_classes = 10
-elif "CIFAR10" in dataset:
+elif "CIFAR100" in dataset:
+    original_scale = 32
     transform = transforms.Compose(
         [transforms.ToTensor(),
          transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
@@ -55,8 +61,9 @@ elif "CIFAR10" in dataset:
                                            download=True, transform=transform)
     num_classes = 100
 elif "Caltech" in dataset:
+    # original_scale = 224
     transform = transforms.Compose(
-        [transforms.Resize((224, 224)),
+        [transforms.Resize((original_scale, original_scale)),
             transforms.ToTensor(),
          transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
     trainset = torchvision.datasets.ImageFolder(
@@ -69,8 +76,9 @@ elif "Caltech" in dataset:
     )
     num_classes = 101
 elif "CelebA" in dataset:
+    # original_scale = 224
     transform = transforms.Compose(
-        [transforms.Resize((224, 224)),
+        [transforms.Resize((original_scale, original_scale)),
             transforms.ToTensor(),
          transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
     trainset = torchvision.datasets.ImageFolder(
@@ -83,8 +91,9 @@ elif "CelebA" in dataset:
     )
     num_classes = 100
 elif "ImageNet" in dataset:
+    # original_scale = 224
     transform = transforms.Compose(
-        [transforms.Resize((224, 224)),
+        [transforms.Resize((original_scale, original_scale)),
             transforms.ToTensor(),
          transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
     trainset = torchvision.datasets.ImageFolder(
@@ -110,18 +119,29 @@ testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
 #            'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
 ########### Models (Total:8) #################
-model_en = MIMOUNetv2_encoder(scale=compression_rate).cuda()
-model_de = MIMOUNetv2_decoder(scale=compression_rate).cuda()
-model_rec = MIMOUNetv2(scale=compression_rate,enemy=False).cuda()
-model_enemy = MIMOUNetv2(scale=compression_rate,enemy=True).cuda()
+model_en = MIMOUNetv2_encoder(scale=compression_rate, original_scale=original_scale).cuda()
+model_de = MIMOUNetv2_decoder(scale=compression_rate, original_scale=original_scale).cuda()
+model_rec = MIMOUNetv2(scale=compression_rate,enemy=False, original_scale=original_scale).cuda()
+model_enemy = MIMOUNetv2(scale=compression_rate,enemy=True, original_scale=original_scale).cuda()
 # net = Simple_Class_Net().cuda()
 model_dis = SimplePatchGAN().cuda()
-net1 = VGG('VGG19', num_classes=num_classes).cuda()
-net2 = ResNet18(num_classes=num_classes).cuda()
-# net = PreActResNet18()
-net3 = GoogLeNet(num_classes=num_classes).cuda()
-# net = DenseNet121()
-
+net1 = torchvision.models.densenet121(pretrained=False)
+net1.classifier = nn.Linear(1024,num_classes)
+net1 = net1.cuda()
+net2 = torchvision.models.resnet50(pretrained=False)
+net2.fc = nn.Linear(2048,num_classes)
+net2 = net2.cuda()
+net3 = torchvision.models.vgg19_bn(pretrained=False)
+net3.classifier = nn.Sequential(
+    nn.Linear(in_features=25088, out_features=4096, bias=True),
+    nn.ReLU(inplace=True),
+    nn.Dropout(p=0.5, inplace=False),
+    nn.Linear(in_features=4096, out_features=4096, bias=True),
+    nn.ReLU(inplace=True),
+    nn.Dropout(p=0.5, inplace=False),
+    nn.Linear(in_features=4096, out_features=num_classes, bias=True),
+)
+net3 = net3.cuda()
 ########### Losses #################
 quantization = diff_round
 cw_loss = CWLoss(num_classes=num_classes).cuda()

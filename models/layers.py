@@ -18,6 +18,7 @@ class BasicConv(nn.Module):
                 nn.Conv2d(in_channel, out_channel, kernel_size, padding=padding, stride=stride, bias=bias))
         if norm:
             layers.append(nn.BatchNorm2d(out_channel))
+            # layers.append(nn.GroupNorm(num_groups=4,num_channels=out_channel))
         if relu:
             layers.append(nn.ELU(inplace=True))
         self.main = nn.Sequential(*layers)
