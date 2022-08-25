@@ -2,8 +2,7 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 import torch.nn as nn
-from models.MIMOUNet import MIMOUNet_encoder, MIMOUNet_decoder, MIMOUNet, Simple_Class_Net, SimplePatchGAN, \
-    MIMOUNetv2_decoder, MIMOUNetv2_encoder, MIMOUNetv2
+from models.MIMOUNet import SimplePatchGAN, MIMOUNetv2_decoder, MIMOUNetv2_encoder, MIMOUNetv2
 from metrics import PSNR, postprocess
 from models.loss import CWLoss
 from models.class_models.vgg import VGG
@@ -30,6 +29,7 @@ transform = transforms.Compose(
 
 ########### Settings ################
 print_step, save_step = 50, 750
+num_epochs = 50
 batch_size = args.batch
 psnr_thresh = args.thresh # 28
 cls_weight = args.cls_weight #0.005
@@ -94,17 +94,17 @@ optimizer_en = optim.AdamW(model_en.parameters(),
 optimizer_de = optim.AdamW(model_de.parameters(),
                                  lr=2e-4)
 optimizer_net1 = optim.AdamW(net1.parameters(),
-                                 lr=1e-3)
+                                 lr=2e-4)
 optimizer_net2 = optim.AdamW(net2.parameters(),
-                                 lr=1e-3)
+                                 lr=2e-4)
 optimizer_net3 = optim.AdamW(net3.parameters(),
-                                 lr=1e-3)
+                                 lr=2e-4)
 optimizer_rec = optim.AdamW(model_rec.parameters(),
                                  lr=2e-4)
 optimizer_enemy = optim.AdamW(model_enemy.parameters(),
                                  lr=2e-4)
 
-for epoch in range(50):  # loop over the dataset multiple times
+for epoch in range(num_epochs):  # loop over the dataset multiple times
     with torch.enable_grad():
         model_enemy.train()
         model_dis.train()
@@ -215,7 +215,7 @@ for epoch in range(50):  # loop over the dataset multiple times
                                  criterion(net3(enemy_recovered), labels)
                 loss_cls_enemy1 /= 3
 
-                loss += -cls_weight*loss_cls_enemy1
+                loss += -4*cls_weight*loss_cls_enemy1
                 loss += -cls_weight*loss_cls_wrong #+1*cls_weight*loss_cls_right
             loss.backward()
             optimizer_en.step()
