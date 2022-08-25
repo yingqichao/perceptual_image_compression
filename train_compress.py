@@ -30,7 +30,7 @@ print(args)
 
 ########### Settings ################
 original_scale = args.original_scale
-print_step, save_step = 50, 750
+print_step, save_step = 50, 500
 num_epochs = 50
 dataset = args.dataset
 batch_size = args.batch
@@ -131,16 +131,8 @@ net1 = net1.cuda()
 net2 = torchvision.models.resnet50(pretrained=False)
 net2.fc = nn.Linear(2048,num_classes)
 net2 = net2.cuda()
-net3 = torchvision.models.vgg19_bn(pretrained=False)
-net3.classifier = nn.Sequential(
-    nn.Linear(in_features=25088, out_features=4096, bias=True),
-    nn.ReLU(inplace=True),
-    nn.Dropout(p=0.5, inplace=False),
-    nn.Linear(in_features=4096, out_features=4096, bias=True),
-    nn.ReLU(inplace=True),
-    nn.Dropout(p=0.5, inplace=False),
-    nn.Linear(in_features=4096, out_features=num_classes, bias=True),
-)
+net3 = torchvision.models.googlenet(pretrained=False)
+net3.fc = nn.Linear(1024, num_classes)
 net3 = net3.cuda()
 ########### Losses #################
 quantization = diff_round
@@ -179,11 +171,11 @@ optimizer_en = optim.AdamW(model_en.parameters(),
 optimizer_de = optim.AdamW(model_de.parameters(),
                                  lr=2e-4)
 optimizer_net1 = optim.AdamW(net1.parameters(),
-                                 lr=2e-4)
+                                 lr=1e-3)
 optimizer_net2 = optim.AdamW(net2.parameters(),
-                                 lr=2e-4)
+                                 lr=1e-3)
 optimizer_net3 = optim.AdamW(net3.parameters(),
-                                 lr=2e-4)
+                                 lr=1e-3)
 optimizer_rec = optim.AdamW(model_rec.parameters(),
                                  lr=2e-4)
 optimizer_enemy = optim.AdamW(model_enemy.parameters(),
@@ -225,7 +217,8 @@ for epoch in range(num_epochs):
             loss_cls2 = criterion(net2(inputs), labels)
             loss_cls2.backward()
             optimizer_net2.step()
-            loss_cls3 = criterion(net3(inputs), labels)
+            google_out, *_ = net3(inputs)
+            loss_cls3 = criterion(google_out, labels)
             loss_cls3.backward()
             optimizer_net3.step()
 
@@ -243,12 +236,13 @@ for epoch in range(num_epochs):
 
                 loss_enemy = loss_l1_enemy
                 if epoch>=args.epoch_thresh:
-                    loss_cls_enemy = criterion(net1(enemy_recovered), labels) + \
-                                     criterion(net2(enemy_recovered), labels) + \
-                                     criterion(net3(enemy_recovered), labels)
-                    loss_cls_enemy /= 3
-                    loss_enemy += cls_weight*loss_cls_enemy
-                    running_cls_enemy += loss_cls_enemy.item()
+                    google_out, *_ = net3(enemy_recovered)
+                    # loss_cls_enemy = criterion(net1(enemy_recovered), labels) + \
+                    #                  criterion(net2(enemy_recovered), labels) + \
+                    #                  criterion(google_out, labels)
+                    # loss_cls_enemy /= 3
+                    # loss_enemy += cls_weight*loss_cls_enemy
+                    # running_cls_enemy += loss_cls_enemy.item()
 
                 loss_enemy.backward()
                 optimizer_enemy.step()
@@ -273,13 +267,16 @@ for epoch in range(num_epochs):
             psnr_forward = psnr(postprocess(decoded), postprocess(inputs)).item()
             psnr_backward = psnr(postprocess(recovered), postprocess(inputs)).item()
 
+            google_out, *_ = net3(decoded)
             loss_cls_wrong = criterion(net1(decoded),labels) + \
                              criterion(net2(decoded),labels) + \
-                             criterion(net3(decoded),labels)
+                             criterion(google_out,labels)
             loss_cls_wrong /= 3
+
+            google_out, *_ = net3(recovered)
             loss_cls_right = criterion(net1(recovered),labels) + \
                              criterion(net2(recovered),labels) + \
-                             criterion(net3(recovered),labels)
+                             criterion(google_out,labels)
             loss_cls_right /= 3
             # loss_CW = cw_loss(should_be_right, labels)
 
@@ -296,13 +293,15 @@ for epoch in range(num_epochs):
             if epoch>=args.epoch_thresh and psnr_forward>=psnr_thresh:
                 ####### enemy step ########
                 enemy_recovered = model_enemy(decoded)
+                google_out, *_ = net3(enemy_recovered)
                 loss_cls_enemy1 = criterion(net1(enemy_recovered), labels) + \
                                  criterion(net2(enemy_recovered), labels) + \
-                                 criterion(net3(enemy_recovered), labels)
+                                 criterion(google_out, labels)
                 loss_cls_enemy1 /= 3
 
-                loss += -4*cls_weight*loss_cls_enemy1
+                loss += -2*cls_weight*loss_cls_enemy1
                 loss += -cls_weight*loss_cls_wrong #+1*cls_weight*loss_cls_right
+                running_cls_enemy += loss_cls_enemy1.item()
             loss.backward()
             optimizer_en.step()
             optimizer_dis.step()
@@ -405,19 +404,22 @@ for epoch in range(num_epochs):
             running_cls1 += (labels == argmax.squeeze()).float().mean()
             _, argmax = torch.max(net2(inputs), 1)
             running_cls2 += (labels == argmax.squeeze()).float().mean()
-            _, argmax = torch.max(net3(inputs), 1)
+            google_out = net3(inputs)
+            _, argmax = torch.max(google_out, 1)
             running_cls3 += (labels == argmax.squeeze()).float().mean()
             _, argmax = torch.max(net1(decoded), 1)
             running_cls_wrong += (labels == argmax.squeeze()).float().mean()
             _, argmax = torch.max(net2(decoded), 1)
             running_cls_wrong += (labels == argmax.squeeze()).float().mean()
-            _, argmax = torch.max(net3(decoded), 1)
+            google_out = net3(decoded)
+            _, argmax = torch.max(google_out, 1)
             running_cls_wrong += (labels == argmax.squeeze()).float().mean()
             _, argmax = torch.max(net1(recovered), 1)
             running_cls_right += (labels == argmax.squeeze()).float().mean()
             _, argmax = torch.max(net2(recovered), 1)
             running_cls_right += (labels == argmax.squeeze()).float().mean()
-            _, argmax = torch.max(net3(recovered), 1)
+            google_out = net3(recovered)
+            _, argmax = torch.max(google_out, 1)
             running_cls_right += (labels == argmax.squeeze()).float().mean()
             _, argmax = torch.max(net1(enemy_recovered), 1)
             if epoch>=args.epoch_thresh:
@@ -426,7 +428,8 @@ for epoch in range(num_epochs):
                 running_cls_enemy += (labels == argmax.squeeze()).float().mean()
                 _, argmax = torch.max(net2(enemy_recovered), 1)
                 running_cls_enemy += (labels == argmax.squeeze()).float().mean()
-                _, argmax = torch.max(net3(enemy_recovered), 1)
+                google_out = net3(enemy_recovered)
+                _, argmax = torch.max(google_out, 1)
                 running_cls_enemy += (labels == argmax.squeeze()).float().mean()
 
             running_coarse += psnr_forward
