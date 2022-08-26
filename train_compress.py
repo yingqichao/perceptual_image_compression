@@ -2,7 +2,7 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 import torch.nn as nn
-from models.MIMOUNet import SimplePatchGAN, MIMOUNetv2_decoder, MIMOUNetv2_encoder, MIMOUNetv2
+from models.MIMOUNet import SimplePatchGAN, MIMOUNetv2_decoder, MIMOUNetv2_encoder, MIMOUNetv2, lightweight_enemy
 from metrics import PSNR, postprocess
 from models.loss import CWLoss
 from models.class_models.vgg import VGG
@@ -30,7 +30,7 @@ print(args)
 
 ########### Settings ################
 original_scale = args.original_scale
-print_step, save_step = 50, 500
+print_step, save_step = 50, 200
 num_epochs = 50
 dataset = args.dataset
 batch_size = args.batch
@@ -122,7 +122,7 @@ testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
 model_en = MIMOUNetv2_encoder(scale=compression_rate, original_scale=original_scale).cuda()
 model_de = MIMOUNetv2_decoder(scale=compression_rate, original_scale=original_scale).cuda()
 model_rec = MIMOUNetv2(scale=compression_rate,enemy=False, original_scale=original_scale).cuda()
-model_enemy = MIMOUNetv2(scale=compression_rate,enemy=True, original_scale=original_scale).cuda()
+model_enemy = lightweight_enemy().cuda() #MIMOUNetv2(scale=compression_rate,enemy=True, original_scale=original_scale).cuda()
 # net = Simple_Class_Net().cuda()
 model_dis = SimplePatchGAN().cuda()
 net1 = torchvision.models.densenet121(pretrained=False)
@@ -179,7 +179,7 @@ optimizer_net3 = optim.AdamW(net3.parameters(),
 optimizer_rec = optim.AdamW(model_rec.parameters(),
                                  lr=2e-4)
 optimizer_enemy = optim.AdamW(model_enemy.parameters(),
-                                 lr=2e-4)
+                                 lr=1e-4)
 
 ########## train ###########################
 for epoch in range(num_epochs):
@@ -235,15 +235,14 @@ for epoch in range(num_epochs):
                 loss_l1_enemy = l1_loss(enemy_recovered, inputs)
 
                 loss_enemy = loss_l1_enemy
-                if epoch>=args.epoch_thresh:
-                    google_out, *_ = net3(enemy_recovered)
-                    # loss_cls_enemy = criterion(net1(enemy_recovered), labels) + \
-                    #                  criterion(net2(enemy_recovered), labels) + \
-                    #                  criterion(google_out, labels)
-                    # loss_cls_enemy /= 3
-                    # loss_enemy += cls_weight*loss_cls_enemy
-                    # running_cls_enemy += loss_cls_enemy.item()
-
+                # if epoch>=args.epoch_thresh:
+                #     google_out, *_ = net3(enemy_recovered)
+                # loss_cls_enemy = criterion(net1(enemy_recovered), labels) + \
+                #                  criterion(net2(enemy_recovered), labels) + \
+                #                  criterion(google_out, labels)
+                # loss_cls_enemy /= 3
+                # loss_enemy += cls_weight*loss_cls_enemy
+                # running_cls_enemy += loss_cls_enemy.item()
                 loss_enemy.backward()
                 optimizer_enemy.step()
                 # optimizer_enemy.zero_grad()
@@ -251,18 +250,16 @@ for epoch in range(num_epochs):
                 psnr_enemy = psnr(postprocess(enemy_recovered), postprocess(inputs)).item()
                 running_psnr_enemy += psnr_enemy
 
-            #######################
-
+            ######## GAN ##########
             # gan_real = model_dis(inputs)
-            # gan_fake = model_dis(recovered.detach())
+            # # gan_fake = model_dis(recovered.detach())
             # gan_fake1 = model_dis(decoded.detach())
             # loss_g_real = bce_with_logits_loss(gan_real,torch.ones_like(gan_real))
-            # loss_g_fake = bce_with_logits_loss(gan_fake,torch.zeros_like(gan_fake))
-            # loss_g_fake1 = bce_with_logits_loss(gan_fake1, torch.zeros_like(gan_fake))
-            # loss_gan = ((loss_g_fake+loss_g_fake1)/2+loss_g_real)/2
+            # loss_g_fake = bce_with_logits_loss(gan_fake1,torch.zeros_like(gan_fake1))
+            # # loss_g_fake1 = bce_with_logits_loss(gan_fake1, torch.zeros_like(gan_fake))
+            # loss_gan = (loss_g_fake+loss_g_real)/2
             # loss_gan.backward()
             # optimizer_dis.step()
-            # optimizer_dis.zero_grad()
 
             psnr_forward = psnr(postprocess(decoded), postprocess(inputs)).item()
             psnr_backward = psnr(postprocess(recovered), postprocess(inputs)).item()
@@ -286,22 +283,29 @@ for epoch in range(num_epochs):
             # gan_fake = model_dis(recovered)
             # loss_g = bce_with_logits_loss(gan_fake,torch.ones_like(gan_fake))
             # gan_fake1 = model_dis(decoded)
-            # loss_g1 = bce_with_logits_loss(gan_fake1, torch.ones_like(gan_fake))
+            # loss_g1 = bce_with_logits_loss(gan_fake1, torch.ones_like(gan_fake1))
 
             loss = loss_coarse+loss_recover
-            # loss += loss_g*0.01+loss_g1*0.01
-            if epoch>=args.epoch_thresh and psnr_forward>=psnr_thresh:
-                ####### enemy step ########
-                enemy_recovered = model_enemy(decoded)
-                google_out, *_ = net3(enemy_recovered)
-                loss_cls_enemy1 = criterion(net1(enemy_recovered), labels) + \
-                                 criterion(net2(enemy_recovered), labels) + \
-                                 criterion(google_out, labels)
-                loss_cls_enemy1 /= 3
+            # loss += loss_g1*0.01
 
-                loss += -2*cls_weight*loss_cls_enemy1
-                loss += -cls_weight*loss_cls_wrong #+1*cls_weight*loss_cls_right
-                running_cls_enemy += loss_cls_enemy1.item()
+            ####### enemy step ########
+            enemy_recovered = model_enemy(decoded)
+            google_out, *_ = net3(enemy_recovered)
+            loss_cls_enemy1 = criterion(net1(enemy_recovered), labels) + \
+                             criterion(net2(enemy_recovered), labels) + \
+                             criterion(google_out, labels)
+            loss_cls_enemy1 /= 3
+
+            weight_psnr = 1
+            if psnr_forward < psnr_thresh:
+                weight_psnr *= 0.25
+            if loss_cls_enemy1>=2:
+                weight_psnr *= 0.5
+
+            loss += -1*weight_psnr*cls_weight*loss_cls_enemy1
+            loss += -weight_psnr*cls_weight*loss_cls_wrong #+1*cls_weight*loss_cls_right
+            running_cls_enemy += loss_cls_enemy1.item()
+
             loss.backward()
             optimizer_en.step()
             optimizer_dis.step()
@@ -309,7 +313,7 @@ for epoch in range(num_epochs):
             optimizer_rec.step()
 
             running_loss += loss.item()
-            # running_gan += loss_gan.item()
+            # running_gan += loss_g1.item()
             running_coarse += psnr_forward
             running_cls1 += loss_cls1.item()
             running_cls2 += loss_cls2.item()
@@ -342,6 +346,7 @@ for epoch in range(num_epochs):
                     postprocess(inputs),
                     postprocess(decoded),
                     postprocess(recovered),
+                    postprocess(enemy_recovered),
                     img_per_row=1
                 )
 
@@ -422,15 +427,15 @@ for epoch in range(num_epochs):
             _, argmax = torch.max(google_out, 1)
             running_cls_right += (labels == argmax.squeeze()).float().mean()
             _, argmax = torch.max(net1(enemy_recovered), 1)
-            if epoch>=args.epoch_thresh:
-                psnr_enemy = psnr(postprocess(enemy_recovered), postprocess(inputs)).item()
-                running_psnr_enemy += psnr_enemy
-                running_cls_enemy += (labels == argmax.squeeze()).float().mean()
-                _, argmax = torch.max(net2(enemy_recovered), 1)
-                running_cls_enemy += (labels == argmax.squeeze()).float().mean()
-                google_out = net3(enemy_recovered)
-                _, argmax = torch.max(google_out, 1)
-                running_cls_enemy += (labels == argmax.squeeze()).float().mean()
+            # if epoch>=args.epoch_thresh:
+            psnr_enemy = psnr(postprocess(enemy_recovered), postprocess(inputs)).item()
+            running_psnr_enemy += psnr_enemy
+            running_cls_enemy += (labels == argmax.squeeze()).float().mean()
+            _, argmax = torch.max(net2(enemy_recovered), 1)
+            running_cls_enemy += (labels == argmax.squeeze()).float().mean()
+            google_out = net3(enemy_recovered)
+            _, argmax = torch.max(google_out, 1)
+            running_cls_enemy += (labels == argmax.squeeze()).float().mean()
 
             running_coarse += psnr_forward
             running_recover += psnr_backward

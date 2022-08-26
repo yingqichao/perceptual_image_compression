@@ -436,6 +436,22 @@ class MIMOUNetv2_decoder(nn.Module):
 
         return torch.tanh(outputs)
 
+class lightweight_enemy(nn.Module):
+    def __init__(self, num_res=8):
+        super(lightweight_enemy, self).__init__()
+        base_channel = 32
+        self.feat_extract = BasicConv(3, base_channel, kernel_size=3, relu=True, stride=1)
+        self.Encoder = nn.Sequential(
+            EBlock(base_channel, num_res),
+            EBlock(base_channel, num_res),
+        )
+        self.output_layer = BasicConv(base_channel, 3, kernel_size=1, relu=False, norm=False, stride=1)
+
+    def forward(self,x):
+        x = self.feat_extract(x)
+        x = self.Encoder(x)
+        x = self.output_layer(x)
+        return x
 
 class MIMOUNetv2(nn.Module):
     def __init__(self, num_res=8, scale=32, original_scale=32, compression_rate=0.5, enemy=False):
@@ -499,21 +515,21 @@ class MIMOUNetv2(nn.Module):
             BasicConv(base_channel, base_channel*1, kernel_size=1, stride=1, relu=False, norm=False)
         )
         self.AFF2_with_SE = nn.Sequential(
-            BasicConv(base_channel * (7+(2 if not enemy else 0)), base_channel*2, kernel_size=3, stride=1, relu=True),
+            BasicConv(base_channel * (7+(1 if not enemy else 0)), base_channel*2, kernel_size=3, stride=1, relu=True),
             BasicConv(base_channel*2, base_channel * 2, kernel_size=1, stride=1, relu=False, norm=False)
         )
         self.AFF3_with_SE = nn.Sequential(
-            BasicConv(base_channel * (7+(4 if not enemy else 0)), base_channel*4, kernel_size=3, stride=1, relu=True),
+            BasicConv(base_channel * (7+(1 if not enemy else 0)), base_channel*4, kernel_size=3, stride=1, relu=True),
             BasicConv(base_channel*4, base_channel * 4, kernel_size=1, stride=1, relu=False, norm=False)
         )
 
         self.se_attention_AFF1 = SEAttention(channel=base_channel * (7+(1 if not enemy else 0)))
-        self.se_attention_AFF2 = SEAttention(channel=base_channel * (7+(2 if not enemy else 0)))
-        self.se_attention_AFF3 = SEAttention(channel=base_channel * (7+(4 if not enemy else 0)))
+        self.se_attention_AFF2 = SEAttention(channel=base_channel * (7+(1 if not enemy else 0)))
+        self.se_attention_AFF3 = SEAttention(channel=base_channel * (7+(1 if not enemy else 0)))
 
-        self.conv1x1_4 = BasicConv(1, base_channel, kernel_size=1, stride=1, relu=False, norm=False)
-        self.conv1x1_2 = BasicConv(1, base_channel*2, kernel_size=1, stride=1, relu=False, norm=False)
-        self.conv1x1_1 = BasicConv(1, base_channel*4, kernel_size=1, stride=1, relu=False, norm=False)
+        self.conv1x1_4 = BasicConv(1, base_channel*1, kernel_size=1, stride=1, relu=False, norm=False)
+        self.conv1x1_2 = BasicConv(1, base_channel*1, kernel_size=1, stride=1, relu=False, norm=False)
+        self.conv1x1_1 = BasicConv(1, base_channel*1, kernel_size=1, stride=1, relu=False, norm=False)
 
         self.FAM1 = FAM(base_channel * 4)
         self.SCM1 = SCM(base_channel * 4)
